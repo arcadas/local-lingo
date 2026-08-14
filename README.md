@@ -15,8 +15,8 @@ A private, local proofreader and translator web app (**LocalLingo**). It rewrite
 
 ## Requirements
 
-- macOS / Linux / Windows with enough RAM for your chosen model  
-  (e.g. `gemma3:12b` works well on Apple Silicon with ~24 GB unified memory)
+- macOS / Linux / Windows
+- About **8 GB RAM** for the default model (`gemma3:4b`). Larger models need more (e.g. `gemma3:12b` around **16 GB**)
 - [Ollama](https://ollama.com/download) installed and running
 - [uv](https://docs.astral.sh/uv/getting-started/installation/) (recommended; it can install Python 3.11+ for you)
 - Python 3.11+ (only if you skip uv and use pip)
@@ -43,31 +43,31 @@ ollama list
 ollama ps
 
 # Pull (download) a model
-ollama pull gemma3:12b
+ollama pull gemma3:4b
 
 # Run a model interactively (optional test)
-ollama run gemma3:12b
+ollama run gemma3:4b
 
 # Unload a model from memory
-ollama stop gemma3:12b
+ollama stop gemma3:4b
 
 # Remove a model from disk
-ollama rm gemma3:12b
+ollama rm gemma3:4b
 ```
 
 ### Suggested models
 
-| Model | Approx. size | Notes |
-|--------|---------------|--------|
-| `gemma3:12b` | ~8 GB | Default in this app; good balance for rewrite + translate |
-| `gemma3:4b` | ~3 GB | Faster / lighter, lower quality |
-| `qwen2.5:7b` | ~4–5 GB | Strong multilingual alternative |
-| `translategemma:12b` | ~8 GB | Strong for pure translation; weaker for rewrite prompts |
+| Model | Approx. size | RAM (typical) | Notes |
+|--------|---------------|----------------|--------|
+| `gemma3:4b` | ~3 GB | ~8 GB | Default; faster and lighter |
+| `gemma3:12b` | ~8 GB | ~16 GB | Higher quality rewrite + translate |
+| `qwen2.5:7b` | ~4–5 GB | ~10 GB | Strong multilingual alternative |
+| `translategemma:12b` | ~8 GB | ~16 GB | Strong for pure translation; weaker for rewrite prompts |
 
-Default used by the app: **`gemma3:12b`**.
+Default used by the app: **`gemma3:4b`**.
 
 ```bash
-ollama pull gemma3:12b
+ollama pull gemma3:4b
 ```
 
 First request after pulling can take longer while the model loads into memory.
@@ -154,7 +154,7 @@ Edit `src/local_lingo/config.py`:
 
 | Setting | Default | Meaning |
 |---------|---------|---------|
-| `MODEL` | `"gemma3:12b"` | Default Ollama model in the UI dropdown, if installed |
+| `MODEL` | `"gemma3:4b"` | Default Ollama model in the UI dropdown, if installed |
 | `DEFAULT_LANGUAGE_PAIR` | `"en-hu"` | Default pair shown in the UI |
 | `OLLAMA_BASE_URL` | `"http://localhost:11434/v1"` | Ollama OpenAI-compatible API |
 | `OLLAMA_API_KEY` | `"ollama"` | Dummy key (required by the OpenAI client; Ollama ignores it) |
@@ -163,10 +163,10 @@ Edit `src/local_lingo/config.py`:
 | `KEEP_ALIVE` | `"30m"` | How long to keep the model loaded in VRAM between requests |
 | `TEMPERATURE` | `0.0` | Lower = more deterministic output |
 
-Example: prefer a smaller model in the dropdown:
+Example: prefer a larger model in the dropdown:
 
 ```python
-MODEL = "gemma3:4b"
+MODEL = "gemma3:12b"
 DEFAULT_LANGUAGE_PAIR = "en-de"
 ```
 
@@ -209,10 +209,10 @@ These cover validation, language catalog, response parsing, mocked Ollama calls,
 | `command not found: python` | Prefer `uv run …`. With pip: use `python3` to create the venv, then `source .venv/bin/activate` |
 | App cannot reach the model | Ensure Ollama is running (`curl http://localhost:11434`) |
 | `model not found` | `ollama pull` the name shown in the Model dropdown |
-| Model dropdown is empty / only the default | Ensure Ollama is running, then reload the page. Pull a model with `ollama pull gemma3:12b` |
+| Model dropdown is empty / only the default | Ensure Ollama is running, then reload the page. Pull a model with `ollama pull gemma3:4b` |
 | First request is very slow | Normal cold start; the model is loading into RAM. Later requests stay warm for `KEEP_ALIVE` |
-| Later requests still slow | Mostly the model itself (`gemma3:12b`). Try `gemma3:4b`, or lower `NUM_CTX` |
-| Out of memory / Mac feels slow | Use a smaller model (`gemma3:4b`) or `ollama stop` unused models |
+| Later requests still slow | Mostly the model itself. Try a smaller model, or lower `NUM_CTX` |
+| Out of memory / machine feels slow | Stay on `gemma3:4b`, or `ollama stop` unused models |
 | Invalid languages | Choose two different languages from the dropdowns |
 | Empty text error | Enter text before clicking the button |
 | Port 7860 in use | Stop the other Gradio process, or change port in `demo.launch(server_port=...)` |

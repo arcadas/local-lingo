@@ -28,6 +28,14 @@ class TranslationResult:
     raw: str = ""
 
 
+@dataclass(frozen=True)
+class ModelCatalog:
+    choices: list[str]
+    selected: str | None
+    reachable: bool
+    warning: str
+
+
 def _client() -> OpenAI:
     global _openai_client
     if _openai_client is None:
@@ -51,8 +59,8 @@ def _usable_model_name(name: str) -> bool:
     return not any(part in lower for part in _SKIP_MODEL_NAME_PARTS)
 
 
-def list_ollama_models() -> list[str]:
-    """Return locally installed Ollama model names, or [] if Ollama is unreachable."""
+def probe_ollama_models() -> tuple[bool, list[str]]:
+    """Return (reachable, installed model names)."""
     request = urllib.request.Request(
         f"{ollama_api_base()}/api/tags",
         headers={"Accept": "application/json"},
@@ -61,23 +69,73 @@ def list_ollama_models() -> list[str]:
         with urllib.request.urlopen(request, timeout=_LIST_MODELS_TIMEOUT) as response:
             payload = json.loads(response.read().decode())
     except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, OSError):
-        return []
+        return False, []
 
     names: list[str] = []
     for item in payload.get("models") or []:
         name = (item.get("name") or item.get("model") or "").strip()
         if name and _usable_model_name(name):
             names.append(name)
-    return sorted(set(names), key=str.lower)
+    return True, sorted(set(names), key=str.lower)
 
 
-def resolve_model_choices(installed: list[str] | None = None) -> tuple[list[str], str]:
-    """Choices for the UI dropdown and the default selection."""
-    names = list(installed if installed is not None else list_ollama_models())
-    if not names:
-        return [config.MODEL], config.MODEL
-    selected = config.MODEL if config.MODEL in names else names[0]
-    return names, selected
+def list_ollama_models() -> list[str]:
+    """Return locally installed Ollama model names, or [] if Ollama is unreachable."""
+    return probe_ollama_models()[1]
+
+
+def get_model_catalog(
+    installed: list[str] | None = None,
+    reachable: bool | None = None,
+) -> ModelCatalog:
+    """Installed models plus a default selection and a user-facing warning if needed."""
+    if installed is None:
+        reachable, installed = probe_ollama_models()
+    elif reachable is None:
+        reachable = True
+
+    if not reachable:
+        return ModelCatalog(
+            choices=[],
+            selected=None,
+            reachable=False,
+            warning=(
+                f"Cannot reach Ollama at {ollama_api_base()}. "
+                "Start Ollama, then reload this page."
+            ),
+        )
+    if not installed:
+        return ModelCatalog(
+            choices=[],
+            selected=None,
+            reachable=True,
+            warning=(
+                f"No Ollama models installed. Pull the default with: "
+                f"ollama pull {config.MODEL}"
+            ),
+        )
+
+    selected = config.MODEL if config.MODEL in installed else installed[0]
+    warning = ""
+    if config.MODEL not in installed:
+        warning = (
+            f"Default model {config.MODEL} is not installed. Using {selected}. "
+            f"Pull it with: ollama pull {config.MODEL}"
+        )
+    return ModelCatalog(
+        choices=installed,
+        selected=selected,
+        reachable=True,
+        warning=warning,
+    )
+
+
+def print_model_startup_status() -> None:
+    catalog = get_model_catalog()
+    if catalog.warning:
+        print(f"LocalLingo: {catalog.warning}")
+        return
+    print(f"LocalLingo: {len(catalog.choices)} Ollama model(s), using {catalog.selected}")
 
 
 def parse_fields(content: str, original: str) -> TranslationResult:

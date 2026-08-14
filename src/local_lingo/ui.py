@@ -5,7 +5,7 @@ import gradio as gr
 
 from . import config
 from .languages import LANGUAGE_CHOICES, codes_from_default_pair
-from .service import resolve_model_choices, translate_and_correct
+from .service import get_model_catalog, translate_and_correct
 from .validation import ValidationError, validate_inputs_from_languages
 
 
@@ -14,7 +14,8 @@ html, body, .gradio-container, .dark, .dark .gradio-container {
   background: #ffffff !important;
   color: #111827 !important;
   color-scheme: light !important;
-  font-family: "DM Sans", "Segoe UI", sans-serif !important;
+  font-family: Inter, ui-sans-serif, system-ui, sans-serif !important;
+  -webkit-font-smoothing: antialiased;
   --body-background-fill: #ffffff !important;
   --background-fill-primary: #ffffff !important;
   --block-background-fill: #ffffff !important;
@@ -24,6 +25,11 @@ html, body, .gradio-container, .dark, .dark .gradio-container {
   --block-title-background-fill: transparent !important;
   --block-title-border-width: 0px !important;
   --block-label-text-color: #4b5563 !important;
+}
+
+button, input, textarea, select, label, .prose, .block, .form {
+  font-family: Inter, ui-sans-serif, system-ui, sans-serif !important;
+  -webkit-font-smoothing: antialiased;
 }
 
 .gradio-container {
@@ -64,7 +70,7 @@ html, body, .gradio-container, .dark, .dark .gradio-container {
   color: #4b5563 !important;
   font-size: 0.98rem !important;
   line-height: 1.45 !important;
-  max-width: 52rem !important;
+  max-width: none !important;
   margin: 0 0 0.85rem 0 !important;
 }
 
@@ -268,6 +274,17 @@ button.primary:hover {
   border-radius: 10px !important;
   padding: 0.65rem 0.85rem !important;
   font-size: 0.95rem !important;
+  font-weight: 600 !important;
+  line-height: 1.4 !important;
+}
+
+.form-message .msg-warn {
+  color: #92400e !important;
+  background: #fef3c7 !important;
+  border: 1px solid #fcd34d !important;
+  border-radius: 10px !important;
+  padding: 0.65rem 0.85rem !important;
+  font-size: 0.92rem !important;
   font-weight: 600 !important;
   line-height: 1.4 !important;
 }
@@ -499,7 +516,14 @@ footer {
 
 FORCE_LIGHT_HEAD = """
 <meta name="color-scheme" content="light only">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:ital,wght@0,400;0,500;0,600;0,700;1,400&display=swap" rel="stylesheet">
 <style>
+  html, body, .gradio-container, button, input, textarea, select, label {
+    font-family: Inter, ui-sans-serif, system-ui, sans-serif !important;
+    -webkit-font-smoothing: antialiased;
+  }
   ul[role="listbox"],
   div[role="listbox"],
   [role="listbox"] {
@@ -670,10 +694,20 @@ COPY_JS = """
 """
 
 
-def _message_html(text: str = "") -> str:
+def _message_html(text: str = "", kind: str = "error") -> str:
     if not text:
         return '<div class="form-message"></div>'
-    return f'<div class="form-message"><div class="msg-error">{text}</div></div>'
+    css = "msg-warn" if kind == "warn" else "msg-error"
+    return f'<div class="form-message"><div class="{css}">{text}</div></div>'
+
+
+def _model_hint_html(warning: str = "") -> str:
+    if warning:
+        return _message_html(warning, kind="warn")
+    return (
+        '<p class="lang-section-hint">Installed Ollama models on this machine. '
+        "The list refreshes when you open the app.</p>"
+    )
 
 
 def _format_elapsed(seconds: float) -> str:
@@ -707,7 +741,17 @@ def _run(text: str, lang_a: str, lang_b: str, model: str | None = None):
         yield (*_empty_results(), _message_html(str(exc)), _timing_html())
         return
 
-    chosen_model = (model or "").strip() or config.MODEL
+    chosen_model = (model or "").strip()
+    catalog = get_model_catalog()
+    if not catalog.selected:
+        yield (
+            *_empty_results(),
+            _message_html(catalog.warning, kind="warn"),
+            _timing_html(),
+        )
+        return
+    if chosen_model not in catalog.choices:
+        chosen_model = catalog.selected
 
     yield (
         gr.update(visible=True, value=_loading_html(str(time.time_ns()))),
@@ -740,8 +784,17 @@ def _run(text: str, lang_a: str, lang_b: str, model: str | None = None):
 
 
 def _refresh_models():
-    choices, selected = resolve_model_choices()
-    return gr.update(choices=choices, value=selected)
+    catalog = get_model_catalog()
+    has_models = bool(catalog.choices)
+    return (
+        gr.update(
+            choices=catalog.choices,
+            value=catalog.selected,
+            interactive=has_models,
+        ),
+        _model_hint_html(catalog.warning),
+        gr.update(interactive=has_models),
+    )
 
 
 def build_ui() -> gr.Blocks:
@@ -749,7 +802,7 @@ def build_ui() -> gr.Blocks:
         primary_hue="blue",
         secondary_hue="slate",
         neutral_hue="slate",
-        font=gr.themes.GoogleFont("DM Sans"),
+        font=gr.themes.GoogleFont("Inter"),
     ).set(
         body_background_fill="#ffffff",
         body_background_fill_dark="#ffffff",
@@ -816,20 +869,17 @@ def build_ui() -> gr.Blocks:
                         container=False,
                         elem_classes=["lang-select"],
                     )
-                gr.HTML(
-                    """
-                    <p class="lang-section-label">Model</p>
-                    <p class="lang-section-hint">Installed Ollama models on this machine. The list refreshes when you open the app.</p>
-                    """
-                )
+                gr.HTML('<p class="lang-section-label">Model</p>')
+                model_hint = gr.HTML(value=_model_hint_html())
                 with gr.Row(elem_classes=["model-row"]):
                     model = gr.Dropdown(
-                        choices=[config.MODEL],
-                        value=config.MODEL,
+                        choices=[],
+                        value=None,
                         show_label=False,
                         filterable=True,
                         allow_custom_value=False,
                         container=False,
+                        interactive=False,
                         elem_classes=["model-select"],
                     )
                 text = gr.Textbox(
@@ -923,7 +973,7 @@ def build_ui() -> gr.Blocks:
 
         demo.load(
             fn=_refresh_models,
-            outputs=[model],
+            outputs=[model, model_hint, btn],
             show_progress="hidden",
         )
 

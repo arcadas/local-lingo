@@ -14,9 +14,10 @@ from local_lingo.languages import (
     name_for_code,
 )
 from local_lingo.service import (
+    ModelCatalog,
+    get_model_catalog,
     list_ollama_models,
     parse_fields,
-    resolve_model_choices,
     translate_and_correct,
 )
 from local_lingo.ui import build_ui, _run
@@ -162,20 +163,31 @@ class TranslateServiceTests(unittest.TestCase):
 
 
 class OllamaModelTests(unittest.TestCase):
-    def test_resolve_prefers_configured_model(self):
-        choices, selected = resolve_model_choices(["gemma3:4b", "gemma3:12b"])
-        self.assertEqual(selected, config.MODEL)
-        self.assertEqual(choices, ["gemma3:4b", "gemma3:12b"])
+    def test_catalog_prefers_configured_model(self):
+        catalog = get_model_catalog(["gemma3:4b", "gemma3:12b"], reachable=True)
+        self.assertEqual(catalog.selected, config.MODEL)
+        self.assertEqual(catalog.choices, ["gemma3:4b", "gemma3:12b"])
+        self.assertEqual(catalog.warning, "")
 
-    def test_resolve_falls_back_when_configured_missing(self):
-        choices, selected = resolve_model_choices(["gemma3:4b"])
-        self.assertEqual(choices, ["gemma3:4b"])
-        self.assertEqual(selected, "gemma3:4b")
+    def test_catalog_falls_back_when_default_missing(self):
+        catalog = get_model_catalog(["gemma3:12b"], reachable=True)
+        self.assertEqual(catalog.choices, ["gemma3:12b"])
+        self.assertEqual(catalog.selected, "gemma3:12b")
+        self.assertIn(config.MODEL, catalog.warning)
+        self.assertIn("gemma3:12b", catalog.warning)
 
-    def test_resolve_uses_config_when_none_installed(self):
-        choices, selected = resolve_model_choices([])
-        self.assertEqual(choices, [config.MODEL])
-        self.assertEqual(selected, config.MODEL)
+    def test_catalog_empty_when_none_installed(self):
+        catalog = get_model_catalog([], reachable=True)
+        self.assertEqual(catalog.choices, [])
+        self.assertIsNone(catalog.selected)
+        self.assertIn("ollama pull", catalog.warning)
+        self.assertIn(config.MODEL, catalog.warning)
+
+    def test_catalog_unreachable(self):
+        catalog = get_model_catalog([], reachable=False)
+        self.assertEqual(catalog.choices, [])
+        self.assertIsNone(catalog.selected)
+        self.assertIn("Cannot reach Ollama", catalog.warning)
 
     @patch("local_lingo.service.urllib.request.urlopen")
     def test_list_models_sorts_and_skips_embeddings(self, mock_urlopen):
@@ -215,8 +227,15 @@ class UiTests(unittest.TestCase):
         self.assertEqual(len(outputs), 1)
         self.assertIn("msg-error", outputs[0][6])
 
+    @patch("local_lingo.ui.get_model_catalog")
     @patch("local_lingo.ui.translate_and_correct")
-    def test_run_success_shows_results(self, mock_translate):
+    def test_run_success_shows_results(self, mock_translate, mock_catalog):
+        mock_catalog.return_value = ModelCatalog(
+            choices=["gemma3:4b"],
+            selected="gemma3:4b",
+            reachable=True,
+            warning="",
+        )
         mock_translate.return_value = MagicMock(
             detected="English",
             corrected="Hello",
@@ -235,8 +254,15 @@ class UiTests(unittest.TestCase):
         mock_translate.assert_called_once()
         self.assertEqual(mock_translate.call_args.kwargs["model"], "gemma3:4b")
 
+    @patch("local_lingo.ui.get_model_catalog")
     @patch("local_lingo.ui.translate_and_correct")
-    def test_run_defaults_model_when_omitted(self, mock_translate):
+    def test_run_defaults_model_when_omitted(self, mock_translate, mock_catalog):
+        mock_catalog.return_value = ModelCatalog(
+            choices=[config.MODEL],
+            selected=config.MODEL,
+            reachable=True,
+            warning="",
+        )
         mock_translate.return_value = MagicMock(
             detected="English",
             corrected="Hello",
@@ -246,6 +272,19 @@ class UiTests(unittest.TestCase):
         )
         list(_run("helo", "en", "hu"))
         self.assertEqual(mock_translate.call_args.kwargs["model"], config.MODEL)
+
+    @patch("local_lingo.ui.get_model_catalog")
+    def test_run_warns_when_no_models(self, mock_catalog):
+        mock_catalog.return_value = ModelCatalog(
+            choices=[],
+            selected=None,
+            reachable=True,
+            warning="No Ollama models installed. Pull the default with: ollama pull gemma3:4b",
+        )
+        outputs = list(_run("hello", "en", "hu"))
+        self.assertEqual(len(outputs), 1)
+        self.assertIn("No Ollama models", outputs[0][6])
+        self.assertIn("msg-warn", outputs[0][6])
 
 
 if __name__ == "__main__":

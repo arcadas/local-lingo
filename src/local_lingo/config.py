@@ -1,12 +1,16 @@
 from pathlib import Path
 
 APP_NAME = "LocalLingo"
-MODEL = "gemma3:12b"
+MODEL = "gemma3:4b"
 DEFAULT_LANGUAGE_PAIR = "en-hu"
 OLLAMA_BASE_URL = "http://localhost:11434/v1"
 OLLAMA_API_KEY = "ollama"
 REQUEST_TIMEOUT_SECONDS = 180.0
 TEMPERATURE = 0.0
+# Gemma 3 defaults to a huge context window; a smaller one is much faster for typical snippets.
+NUM_CTX = 8192
+# Keep the model in VRAM between requests so later runs skip the cold load.
+KEEP_ALIVE = "30m"
 
 ASSETS_DIR = Path(__file__).resolve().parent / "assets"
 ICON_ORIGINAL = ASSETS_DIR / "icon-original.png"

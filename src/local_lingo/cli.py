@@ -2,8 +2,10 @@
 CLI translator — uses the same business logic as the web app.
 """
 
-from translator_web import config
-from translator_web.service import translate_and_correct
+import time
+
+from . import config
+from .service import translate_and_correct
 
 # ANSI colors
 RESET = "\033[0m"
@@ -16,7 +18,7 @@ MAGENTA = "\033[35m"
 WHITE = "\033[97m"
 
 
-def show_result(result, model: str, language_pair: str) -> None:
+def show_result(result, model: str, language_pair: str, elapsed: float) -> None:
     width = 60
     print()
     print(f"{BOLD}{CYAN}{'─' * width}{RESET}")
@@ -35,14 +37,17 @@ def show_result(result, model: str, language_pair: str) -> None:
     if result.note:
         print()
         print(f"{DIM}{result.note}{RESET}")
+    print(f"{DIM}Completed in {elapsed:.1f}s{RESET}")
     print(f"{BOLD}{CYAN}{'─' * width}{RESET}")
     print()
 
 
 def main() -> None:
     text = input("Please enter the text you want me to translate or correct: ")
+    started = time.perf_counter()
     result = translate_and_correct(text, config.DEFAULT_LANGUAGE_PAIR)
-    show_result(result, config.MODEL, config.DEFAULT_LANGUAGE_PAIR)
+    elapsed = time.perf_counter() - started
+    show_result(result, config.MODEL, config.DEFAULT_LANGUAGE_PAIR, elapsed)
 
 
 if __name__ == "__main__":

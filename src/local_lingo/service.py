@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import json
 import re
+import urllib.error
+import urllib.request
 from dataclasses import dataclass
 
 from openai import OpenAI
@@ -8,6 +11,10 @@ from openai import OpenAI
 from . import config
 from .prompts import build_system_prompt, build_user_prompt
 from .validation import ValidationError, validate_inputs
+
+_openai_client: OpenAI | None = None
+_LIST_MODELS_TIMEOUT = 2.5
+_SKIP_MODEL_NAME_PARTS = ("embed", "rerank")
 
 
 @dataclass
@@ -22,11 +29,55 @@ class TranslationResult:
 
 
 def _client() -> OpenAI:
-    return OpenAI(
-        api_key=config.OLLAMA_API_KEY,
-        base_url=config.OLLAMA_BASE_URL,
-        timeout=config.REQUEST_TIMEOUT_SECONDS,
+    global _openai_client
+    if _openai_client is None:
+        _openai_client = OpenAI(
+            api_key=config.OLLAMA_API_KEY,
+            base_url=config.OLLAMA_BASE_URL,
+            timeout=config.REQUEST_TIMEOUT_SECONDS,
+        )
+    return _openai_client
+
+
+def ollama_api_base() -> str:
+    url = config.OLLAMA_BASE_URL.rstrip("/")
+    if url.endswith("/v1"):
+        url = url[: -len("/v1")]
+    return url.rstrip("/")
+
+
+def _usable_model_name(name: str) -> bool:
+    lower = name.lower()
+    return not any(part in lower for part in _SKIP_MODEL_NAME_PARTS)
+
+
+def list_ollama_models() -> list[str]:
+    """Return locally installed Ollama model names, or [] if Ollama is unreachable."""
+    request = urllib.request.Request(
+        f"{ollama_api_base()}/api/tags",
+        headers={"Accept": "application/json"},
     )
+    try:
+        with urllib.request.urlopen(request, timeout=_LIST_MODELS_TIMEOUT) as response:
+            payload = json.loads(response.read().decode())
+    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, OSError):
+        return []
+
+    names: list[str] = []
+    for item in payload.get("models") or []:
+        name = (item.get("name") or item.get("model") or "").strip()
+        if name and _usable_model_name(name):
+            names.append(name)
+    return sorted(set(names), key=str.lower)
+
+
+def resolve_model_choices(installed: list[str] | None = None) -> tuple[list[str], str]:
+    """Choices for the UI dropdown and the default selection."""
+    names = list(installed if installed is not None else list_ollama_models())
+    if not names:
+        return [config.MODEL], config.MODEL
+    selected = config.MODEL if config.MODEL in names else names[0]
+    return names, selected
 
 
 def parse_fields(content: str, original: str) -> TranslationResult:
@@ -99,6 +150,10 @@ def translate_and_correct(
                 {"role": "user", "content": build_user_prompt(cleaned, pair)},
             ],
             temperature=config.TEMPERATURE,
+            extra_body={
+                "keep_alive": config.KEEP_ALIVE,
+                "options": {"num_ctx": config.NUM_CTX},
+            },
         )
     except Exception as exc:
         return TranslationResult(

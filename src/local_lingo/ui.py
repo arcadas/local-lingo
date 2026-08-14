@@ -1,9 +1,11 @@
 import base64
+import time
+
 import gradio as gr
 
 from . import config
 from .languages import LANGUAGE_CHOICES, codes_from_default_pair
-from .service import translate_and_correct
+from .service import resolve_model_choices, translate_and_correct
 from .validation import ValidationError, validate_inputs_from_languages
 
 
@@ -156,6 +158,18 @@ textarea {
   resize: vertical !important;
 }
 
+.lang-name-field textarea,
+.lang-name-field input {
+  overflow: hidden !important;
+  resize: none !important;
+  min-height: 42px !important;
+  height: 42px !important;
+  max-height: 42px !important;
+  line-height: 1.4 !important;
+  padding-top: 0.55rem !important;
+  padding-bottom: 0.55rem !important;
+}
+
 input::placeholder, textarea::placeholder {
   color: #9ca3af !important;
   opacity: 1 !important;
@@ -223,6 +237,23 @@ button.primary:hover {
   font-weight: 600 !important;
 }
 
+.loading-elapsed {
+  color: #9ca3af !important;
+  font-size: 0.85rem !important;
+  font-weight: 500 !important;
+  font-variant-numeric: tabular-nums !important;
+  min-height: 1.2em;
+}
+
+.run-timing {
+  margin: 0.45rem 0 0 0 !important;
+  padding: 0 !important;
+  color: #9ca3af !important;
+  font-size: 0.8rem !important;
+  font-weight: 400 !important;
+  text-align: right !important;
+}
+
 .form-message {
   min-height: 1.25rem;
   margin-top: 0.5rem !important;
@@ -244,6 +275,14 @@ button.primary:hover {
 .lang-row {
   display: grid !important;
   grid-template-columns: 1fr auto 1fr !important;
+  gap: 0.75rem !important;
+  align-items: center !important;
+  margin: 0 0 0.55rem 0 !important;
+}
+
+.model-row {
+  display: grid !important;
+  grid-template-columns: 1fr !important;
   gap: 0.75rem !important;
   align-items: center !important;
   margin: 0 0 0.55rem 0 !important;
@@ -286,7 +325,17 @@ button.primary:hover {
 .lang-row [class*="secondary-wrap"],
 .lang-row [class*="wrap"],
 .lang-select,
-.lang-row .lang-select {
+.lang-row .lang-select,
+.model-row .block,
+.model-row .form,
+.model-row > div,
+.model-row .container,
+.model-row .wrap,
+.model-row .secondary-wrap,
+.model-row [class*="secondary-wrap"],
+.model-row [class*="wrap"],
+.model-select,
+.model-row .model-select {
   background: transparent !important;
   border: none !important;
   outline: none !important;
@@ -295,7 +344,8 @@ button.primary:hover {
   margin: 0 !important;
 }
 
-.lang-row input {
+.lang-row input,
+.model-row input {
   background: #ffffff !important;
   border: 1px solid #d1d5db !important;
   border-radius: 10px !important;
@@ -306,7 +356,8 @@ button.primary:hover {
   padding: 0.55rem 0.75rem !important;
 }
 
-.lang-row input:focus {
+.lang-row input:focus,
+.model-row input:focus {
   border: 1px solid #9ca3af !important;
   box-shadow: none !important;
   outline: none !important;
@@ -314,11 +365,14 @@ button.primary:hover {
 
 /* Prevent focus ring on parent wrappers */
 .lang-row *:focus,
-.lang-row *:focus-within {
+.lang-row *:focus-within,
+.model-row *:focus,
+.model-row *:focus-within {
   outline: none !important;
 }
 
-.lang-row input:focus {
+.lang-row input:focus,
+.model-row input:focus {
   border: 1px solid #9ca3af !important;
 }
 
@@ -498,6 +552,50 @@ window.addEventListener("load", () => {
   window.addEventListener("resize", positionCopyButtons);
 });
 setInterval(positionCopyButtons, 500);
+
+function formatElapsed(ms) {
+  const total = Math.max(0, ms / 1000);
+  if (total < 60) return total.toFixed(1) + "s";
+  const minutes = Math.floor(total / 60);
+  const secs = Math.round(total % 60);
+  return minutes + "m " + String(secs).padStart(2, "0") + "s";
+}
+
+let loaderStartedAt = 0;
+let loaderRunId = null;
+let loaderClearTimer = null;
+
+function tickLoader() {
+  const box = document.querySelector(".loading-box");
+  const elapsedEl = box ? box.querySelector(".loading-elapsed") : null;
+  if (!box || !elapsedEl) {
+    if (!loaderClearTimer && loaderStartedAt) {
+      loaderClearTimer = setTimeout(() => {
+        loaderStartedAt = 0;
+        loaderRunId = null;
+        loaderClearTimer = null;
+      }, 400);
+    }
+    return;
+  }
+  if (loaderClearTimer) {
+    clearTimeout(loaderClearTimer);
+    loaderClearTimer = null;
+  }
+  const runId = box.getAttribute("data-run") || "loading";
+  if (runId !== loaderRunId) {
+    loaderRunId = runId;
+    loaderStartedAt = Date.now();
+  }
+  elapsedEl.textContent = formatElapsed(Date.now() - loaderStartedAt);
+}
+
+setInterval(tickLoader, 100);
+if (document.readyState === "loading") {
+  document.addEventListener("DOMContentLoaded", tickLoader);
+} else {
+  tickLoader();
+}
 </script>
 """
 
@@ -536,7 +634,7 @@ def _brand_header_html() -> str:
         <h1>{config.APP_NAME}</h1>
       </div>
     </div>
-    <p>Detects which language you pasted, rewrites it to sound natural, then translates it to the other language in your pair — privately on your machine via Ollama (<code>{config.MODEL}</code>).</p>
+    <p>Detects which language you pasted, rewrites it to sound natural, then translates it to the other language in your pair — privately on your machine via Ollama.</p>
     """
 
 
@@ -546,10 +644,12 @@ PLACEHOLDER_HTML = """
 </div>
 """
 
-LOADING_HTML = """
-<div class="loading-box">
+def _loading_html(run_id: str) -> str:
+    return f"""
+<div class="loading-box" data-run="{run_id}">
   <div class="spinner"></div>
   <div class="loading-text">Working on your text…</div>
+  <div class="loading-elapsed">0.0s</div>
 </div>
 """
 
@@ -576,6 +676,19 @@ def _message_html(text: str = "") -> str:
     return f'<div class="form-message"><div class="msg-error">{text}</div></div>'
 
 
+def _format_elapsed(seconds: float) -> str:
+    if seconds < 60:
+        return f"{seconds:.1f}s"
+    minutes, secs = divmod(round(seconds), 60)
+    return f"{minutes}m {secs:02d}s"
+
+
+def _timing_html(seconds: float | None = None) -> str:
+    if seconds is None:
+        return '<p class="run-timing"></p>'
+    return f'<p class="run-timing">Completed in {_format_elapsed(seconds)}</p>'
+
+
 def _empty_results():
     return (
         gr.update(visible=True, value=PLACEHOLDER_HTML),
@@ -587,27 +700,31 @@ def _empty_results():
     )
 
 
-def _run(text: str, lang_a: str, lang_b: str):
+def _run(text: str, lang_a: str, lang_b: str, model: str | None = None):
     try:
         cleaned, pair = validate_inputs_from_languages(text, lang_a, lang_b)
     except ValidationError as exc:
-        yield (*_empty_results(), _message_html(str(exc)))
+        yield (*_empty_results(), _message_html(str(exc)), _timing_html())
         return
 
-    # Show modern loader while the model runs
+    chosen_model = (model or "").strip() or config.MODEL
+
     yield (
-        gr.update(visible=True, value=LOADING_HTML),
+        gr.update(visible=True, value=_loading_html(str(time.time_ns()))),
         gr.update(visible=False),
         "",
         "",
         "",
         "",
         _message_html(""),
+        _timing_html(),
     )
 
-    result = translate_and_correct(cleaned, pair)
+    started = time.perf_counter()
+    result = translate_and_correct(cleaned, pair, model=chosen_model)
+    elapsed = time.perf_counter() - started
     if result.note and (not result.corrected or result.corrected == "?"):
-        yield (*_empty_results(), _message_html(result.note))
+        yield (*_empty_results(), _message_html(result.note), _timing_html(elapsed))
         return
 
     yield (
@@ -618,7 +735,13 @@ def _run(text: str, lang_a: str, lang_b: str):
         result.target,
         result.translation,
         _message_html(""),
+        _timing_html(elapsed),
     )
+
+
+def _refresh_models():
+    choices, selected = resolve_model_choices()
+    return gr.update(choices=choices, value=selected)
 
 
 def build_ui() -> gr.Blocks:
@@ -693,6 +816,22 @@ def build_ui() -> gr.Blocks:
                         container=False,
                         elem_classes=["lang-select"],
                     )
+                gr.HTML(
+                    """
+                    <p class="lang-section-label">Model</p>
+                    <p class="lang-section-hint">Installed Ollama models on this machine. The list refreshes when you open the app.</p>
+                    """
+                )
+                with gr.Row(elem_classes=["model-row"]):
+                    model = gr.Dropdown(
+                        choices=[config.MODEL],
+                        value=config.MODEL,
+                        show_label=False,
+                        filterable=True,
+                        allow_custom_value=False,
+                        container=False,
+                        elem_classes=["model-select"],
+                    )
                 text = gr.Textbox(
                     lines=8,
                     max_lines=8,
@@ -706,7 +845,13 @@ def build_ui() -> gr.Blocks:
             with gr.Column(scale=1, min_width=320, elem_id="right-card", elem_classes=["card"]):
                 placeholder = gr.HTML(value=PLACEHOLDER_HTML, visible=True)
                 with gr.Column(visible=False) as results:
-                    detected = gr.Textbox(label="Detected language", interactive=False)
+                    detected = gr.Textbox(
+                        label="Detected language",
+                        interactive=False,
+                        lines=1,
+                        max_lines=1,
+                        elem_classes=["lang-name-field"],
+                    )
 
                     with gr.Column(elem_classes=["copyable-field"]):
                         corrected = gr.Textbox(
@@ -723,7 +868,13 @@ def build_ui() -> gr.Blocks:
                             size="sm",
                         )
 
-                    target = gr.Textbox(label="Target language", interactive=False)
+                    target = gr.Textbox(
+                        label="Target language",
+                        interactive=False,
+                        lines=1,
+                        max_lines=1,
+                        elem_classes=["lang-name-field"],
+                    )
 
                     with gr.Column(elem_classes=["copyable-field"]):
                         translation = gr.Textbox(
@@ -739,6 +890,7 @@ def build_ui() -> gr.Blocks:
                             elem_classes=["modern-copy-btn"],
                             size="sm",
                         )
+                    run_timing = gr.HTML(value=_timing_html())
 
         copy_corrected.click(
             fn=None,
@@ -755,7 +907,7 @@ def build_ui() -> gr.Blocks:
 
         btn.click(
             fn=_run,
-            inputs=[text, lang_a, lang_b],
+            inputs=[text, lang_a, lang_b, model],
             outputs=[
                 placeholder,
                 results,
@@ -764,7 +916,14 @@ def build_ui() -> gr.Blocks:
                 target,
                 translation,
                 form_message,
+                run_timing,
             ],
+            show_progress="hidden",
+        )
+
+        demo.load(
+            fn=_refresh_models,
+            outputs=[model],
             show_progress="hidden",
         )
 

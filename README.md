@@ -1,6 +1,8 @@
-# LocalLingo
+<p align="center">
+  <img src="./src/local_lingo/assets/icon-readme.png" width="88" alt="LocalLingo icon">
+</p>
 
-![LocalLingo icon](./translator_web/assets/icon-readme.png)
+<h1 align="center">LocalLingo</h1>
 
 A private, local proofreader and translator web app (**LocalLingo**). It rewrites text so it sounds natural in the detected language, then translates it to the other language in your pair — using [Ollama](https://ollama.com) on your machine.
 
@@ -16,7 +18,8 @@ A private, local proofreader and translator web app (**LocalLingo**). It rewrite
 - macOS / Linux / Windows with enough RAM for your chosen model  
   (e.g. `gemma3:12b` works well on Apple Silicon with ~24 GB unified memory)
 - [Ollama](https://ollama.com/download) installed and running
-- Python 3.11+
+- [uv](https://docs.astral.sh/uv/getting-started/installation/) (recommended; it can install Python 3.11+ for you)
+- Python 3.11+ (only if you skip uv and use pip)
 
 ## 1. Install and start Ollama
 
@@ -71,76 +74,96 @@ First request after pulling can take longer while the model loads into memory.
 
 ## 2. Project setup
 
+Install [uv](https://docs.astral.sh/uv/getting-started/installation/) if you do not have it yet, then:
+
 ```bash
 git clone git@github.com:arcadas/local-lingo.git
 cd local-lingo
-python -m venv .venv
-source .venv/bin/activate   # Windows: .venv\Scripts\activate
-pip install -e .
+uv sync
 ```
 
-Or with [uv](https://github.com/astral-sh/uv):
+`uv sync` creates `.venv` and installs locked dependencies. It will also fetch a compatible Python (3.11+) if needed.
+
+### pip (alternative)
 
 ```bash
-uv sync
-source .venv/bin/activate
+git clone git@github.com:arcadas/local-lingo.git
+cd local-lingo
+python3 -m venv .venv
+source .venv/bin/activate   # Windows: .venv\Scripts\activate
+python -m pip install -e .
 ```
+
+On macOS and many Linux systems the interpreter is **`python3`**, not `python`. If `python3` is missing, install Python 3.11+ from [python.org](https://www.python.org/downloads/) or Homebrew (`brew install python`). Windows: `py -3 -m venv .venv`. After `source .venv/bin/activate`, `python` points at this project’s environment.
 
 ## 3. Start the web app
 
 ```bash
-python -m translator_web
+uv run local-lingo
 ```
+
+Or equivalently: `uv run python -m local_lingo`.
 
 Or with auto-reload while developing:
 
 ```bash
-gradio run_translator_web.py --watch-dirs translator_web
+uv run gradio app.py --watch-dirs src/local_lingo
 ```
 
 Then open the URL shown in the terminal (usually [http://127.0.0.1:7860](http://127.0.0.1:7860)).
+
+If you installed with pip instead, activate the venv and run `local-lingo` (or `python -m local_lingo`).
 
 ### CLI (optional)
 
 Same business logic, terminal UI:
 
 ```bash
-python translator.py
+uv run local-lingo-cli
 ```
 
 ## 4. How to use the app
 
 1. Choose the two **Languages** (type to filter; full names like “English”).
-2. Paste your text (either language of the pair).
-3. Click **Correct & Translate**.
-4. Read:
+2. Choose the **Model** (installed Ollama models; e.g. `gemma3:4b` vs `gemma3:12b`).
+3. Paste your text (either language of the pair).
+4. Click **Correct & Translate**.
+5. Read:
    - Detected language  
    - Corrected (native rewrite)  
    - Target language  
    - Translation  
-5. Use the **copy** buttons on the corrected and translation fields to copy results.
+6. Use the **copy** buttons on the corrected and translation fields to copy results.
 
 ### Language selection
 
 - Pick from the searchable dropdowns (full language names)
 - The pair is **bidirectional**: the model detects which side the text is in, corrects it, then translates to the other
 - Both languages must be different
-- Defaults come from `DEFAULT_LANGUAGE_PAIR` in `translator_web/config.py` (e.g. `en-hu` → English / Hungarian)
+- Defaults come from `DEFAULT_LANGUAGE_PAIR` in `src/local_lingo/config.py` (e.g. `en-hu` → English / Hungarian)
+
+### Model selection
+
+- The dropdown is filled from Ollama (`GET /api/tags`) when you open the app
+- Embedding models are omitted
+- `MODEL` in `config.py` is selected by default if that model is installed; otherwise the first installed model is used
 
 ## 5. Configuration
 
-Edit `translator_web/config.py`:
+Edit `src/local_lingo/config.py`:
 
 | Setting | Default | Meaning |
 |---------|---------|---------|
-| `MODEL` | `"gemma3:12b"` | Ollama model name (`ollama pull` this first) |
+| `MODEL` | `"gemma3:12b"` | Default Ollama model in the UI dropdown, if installed |
 | `DEFAULT_LANGUAGE_PAIR` | `"en-hu"` | Default pair shown in the UI |
 | `OLLAMA_BASE_URL` | `"http://localhost:11434/v1"` | Ollama OpenAI-compatible API |
 | `OLLAMA_API_KEY` | `"ollama"` | Dummy key (required by the OpenAI client; Ollama ignores it) |
 | `REQUEST_TIMEOUT_SECONDS` | `180.0` | Max wait for a model response |
+| `NUM_CTX` | `8192` | Ollama context window; smaller is faster for typical snippets |
+| `KEEP_ALIVE` | `"30m"` | How long to keep the model loaded in VRAM between requests |
 | `TEMPERATURE` | `0.0` | Lower = more deterministic output |
 
-Example: switch to a smaller model:
+Example: prefer a smaller model in the dropdown:
 
 ```python
 MODEL = "gemma3:4b"
@@ -149,7 +172,7 @@ DEFAULT_LANGUAGE_PAIR = "en-de"
 
 Then restart the app (or let `gradio` reload if you are in watch mode).
 
-Prompts live in `translator_web/prompts.py`. Parsing and Ollama calls live in `translator_web/service.py`. Validation lives in `translator_web/validation.py`. UI lives in `translator_web/ui.py`.
+Prompts live in `src/local_lingo/prompts.py`. Parsing and Ollama calls live in `src/local_lingo/service.py`. Validation lives in `src/local_lingo/validation.py`. UI lives in `src/local_lingo/ui.py`.
 
 ## 6. Project layout
 
@@ -157,24 +180,24 @@ Prompts live in `translator_web/prompts.py`. Parsing and Ollama calls live in `t
 .
   README.md
   pyproject.toml
-  translator.py              # CLI entry
-  run_translator_web.py      # Gradio watch-friendly entry
-  translator_web/
+  app.py                     # Gradio watch-friendly entry
+  src/local_lingo/           # Installable package (`import local_lingo`)
     config.py                # Model and Ollama settings
     prompts.py               # System / user prompts
     validation.py            # Input validation
     service.py               # Business logic (Ollama + parsing)
     ui.py                    # Gradio UI
-    app.py                   # python -m translator_web
+    app.py                   # Web entry (`uv run local-lingo`)
+    cli.py                   # Terminal UI (`uv run local-lingo-cli`)
     languages.py             # Language catalog
     assets/                  # Brand icons and favicons
-    tests/
+  tests/
 ```
 
 ## 7. Tests
 
 ```bash
-python -m unittest translator_web.tests.test_locallingo -v
+uv run python -m unittest discover -s tests -v
 ```
 
 These cover validation, language catalog, response parsing, mocked Ollama calls, and UI build.
@@ -183,9 +206,12 @@ These cover validation, language catalog, response parsing, mocked Ollama calls,
 
 | Problem | What to try |
 |---------|-------------|
+| `command not found: python` | Prefer `uv run …`. With pip: use `python3` to create the venv, then `source .venv/bin/activate` |
 | App cannot reach the model | Ensure Ollama is running (`curl http://localhost:11434`) |
-| `model not found` | `ollama pull <MODEL>` matching `config.MODEL` |
-| First request is very slow | Normal cold start; model is loading into RAM |
+| `model not found` | `ollama pull` the name shown in the Model dropdown |
+| Model dropdown is empty / only the default | Ensure Ollama is running, then reload the page. Pull a model with `ollama pull gemma3:12b` |
+| First request is very slow | Normal cold start; the model is loading into RAM. Later requests stay warm for `KEEP_ALIVE` |
+| Later requests still slow | Mostly the model itself (`gemma3:12b`). Try `gemma3:4b`, or lower `NUM_CTX` |
 | Out of memory / Mac feels slow | Use a smaller model (`gemma3:4b`) or `ollama stop` unused models |
 | Invalid languages | Choose two different languages from the dropdowns |
 | Empty text error | Enter text before clicking the button |

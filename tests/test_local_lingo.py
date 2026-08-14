@@ -1,20 +1,26 @@
-"""Automated tests for LocalLingo (translator_web)."""
+"""Automated tests for LocalLingo."""
 
 from __future__ import annotations
 
+import json
 import unittest
 from unittest.mock import MagicMock, patch
 
-from translator_web import config
-from translator_web.languages import (
+from local_lingo import config
+from local_lingo.languages import (
     CODE_TO_NAME,
     LANGUAGE_CHOICES,
     codes_from_default_pair,
     name_for_code,
 )
-from translator_web.service import parse_fields, translate_and_correct
-from translator_web.ui import build_ui, _run
-from translator_web.validation import (
+from local_lingo.service import (
+    list_ollama_models,
+    parse_fields,
+    resolve_model_choices,
+    translate_and_correct,
+)
+from local_lingo.ui import build_ui, _run
+from local_lingo.validation import (
     ValidationError,
     resolve_language_code,
     validate_inputs_from_languages,
@@ -121,7 +127,7 @@ Translation (Hungarian): "Rossz az angolom"
 
 
 class TranslateServiceTests(unittest.TestCase):
-    @patch("translator_web.service._client")
+    @patch("local_lingo.service._client")
     def test_translate_and_correct_success(self, mock_client_factory):
         mock_client = MagicMock()
         mock_client_factory.return_value = mock_client
@@ -145,11 +151,52 @@ class TranslateServiceTests(unittest.TestCase):
         self.assertEqual(result.corrected, "Hi")
         self.assertEqual(result.translation, "Szia")
         mock_client.chat.completions.create.assert_called_once()
+        kwargs = mock_client.chat.completions.create.call_args.kwargs
+        self.assertEqual(kwargs["extra_body"]["keep_alive"], config.KEEP_ALIVE)
+        self.assertEqual(kwargs["extra_body"]["options"]["num_ctx"], config.NUM_CTX)
 
     def test_translate_and_correct_validation_error(self):
         result = translate_and_correct("", "en-hu")
         self.assertIn("text", result.note.lower())
         self.assertEqual(result.corrected, "")
+
+
+class OllamaModelTests(unittest.TestCase):
+    def test_resolve_prefers_configured_model(self):
+        choices, selected = resolve_model_choices(["gemma3:4b", "gemma3:12b"])
+        self.assertEqual(selected, config.MODEL)
+        self.assertEqual(choices, ["gemma3:4b", "gemma3:12b"])
+
+    def test_resolve_falls_back_when_configured_missing(self):
+        choices, selected = resolve_model_choices(["gemma3:4b"])
+        self.assertEqual(choices, ["gemma3:4b"])
+        self.assertEqual(selected, "gemma3:4b")
+
+    def test_resolve_uses_config_when_none_installed(self):
+        choices, selected = resolve_model_choices([])
+        self.assertEqual(choices, [config.MODEL])
+        self.assertEqual(selected, config.MODEL)
+
+    @patch("local_lingo.service.urllib.request.urlopen")
+    def test_list_models_sorts_and_skips_embeddings(self, mock_urlopen):
+        payload = {
+            "models": [
+                {"name": "gemma3:12b"},
+                {"name": "nomic-embed-text:latest"},
+                {"name": "gemma3:4b"},
+            ]
+        }
+        response = MagicMock()
+        response.read.return_value = json.dumps(payload).encode()
+        response.__enter__.return_value = response
+        response.__exit__.return_value = False
+        mock_urlopen.return_value = response
+
+        self.assertEqual(list_ollama_models(), ["gemma3:12b", "gemma3:4b"])
+
+    @patch("local_lingo.service.urllib.request.urlopen", side_effect=OSError("down"))
+    def test_list_models_unreachable(self, _mock_urlopen):
+        self.assertEqual(list_ollama_models(), [])
 
 
 class UiTests(unittest.TestCase):
@@ -161,16 +208,14 @@ class UiTests(unittest.TestCase):
     def test_run_validation_error_yields_message(self):
         outputs = list(_run("", "en", "hu"))
         self.assertEqual(len(outputs), 1)
-        *_, message_html = outputs[0]
-        self.assertIn("msg-error", message_html)
+        self.assertIn("msg-error", outputs[0][6])
 
     def test_run_same_language_yields_message(self):
         outputs = list(_run("hello", "en", "en"))
         self.assertEqual(len(outputs), 1)
-        *_, message_html = outputs[0]
-        self.assertIn("msg-error", message_html)
+        self.assertIn("msg-error", outputs[0][6])
 
-    @patch("translator_web.ui.translate_and_correct")
+    @patch("local_lingo.ui.translate_and_correct")
     def test_run_success_shows_results(self, mock_translate):
         mock_translate.return_value = MagicMock(
             detected="English",
@@ -179,13 +224,28 @@ class UiTests(unittest.TestCase):
             translation="Szia",
             note="",
         )
-        outputs = list(_run("helo", "en", "hu"))
+        outputs = list(_run("helo", "en", "hu", "gemma3:4b"))
         # loader yield + final yield
         self.assertEqual(len(outputs), 2)
         final = outputs[-1]
         self.assertEqual(final[2], "English")
         self.assertEqual(final[3], "Hello")
         self.assertEqual(final[5], "Szia")
+        self.assertIn("Completed in", final[7])
+        mock_translate.assert_called_once()
+        self.assertEqual(mock_translate.call_args.kwargs["model"], "gemma3:4b")
+
+    @patch("local_lingo.ui.translate_and_correct")
+    def test_run_defaults_model_when_omitted(self, mock_translate):
+        mock_translate.return_value = MagicMock(
+            detected="English",
+            corrected="Hello",
+            target="Hungarian",
+            translation="Szia",
+            note="",
+        )
+        list(_run("helo", "en", "hu"))
+        self.assertEqual(mock_translate.call_args.kwargs["model"], config.MODEL)
 
 
 if __name__ == "__main__":

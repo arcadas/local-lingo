@@ -894,26 +894,34 @@ span[data-testid="block-info"],
   position: relative !important;
 }
 
+.copyable-field .corrected-html,
+.copyable-field .corrected-html .html-container,
+.copyable-field .corrected-html .prose,
+.copyable-field .corrected-block {
+  max-width: none !important;
+  width: 100% !important;
+  margin: 0 !important;
+  padding: 0 !important;
+}
+
 .copyable-field textarea,
-.corrected-box {
-  padding-top: 0.65rem !important;
-  padding-right: 2.5rem !important;
-  padding-bottom: 0.65rem !important;
+.corrected-box,
+.copyable-field .corrected-html .prose,
+.copyable-field .corrected-html .prose .corrected-box,
+.copyable-field .corrected-html .prose .corrected-box * {
   font-size: 0.875rem !important;
   font-weight: 400 !important;
   line-height: 1.5 !important;
   letter-spacing: normal !important;
+  font-variant: normal !important;
+  font-feature-settings: normal !important;
   color: #111827 !important;
   font-family: Inter, ui-sans-serif, system-ui, sans-serif !important;
 }
 
-.copyable-field .prose,
-.copyable-field .html-container .corrected-box,
-.corrected-box,
-.corrected-box * {
-  font-size: 0.875rem !important;
-  line-height: 1.5 !important;
-  font-family: Inter, ui-sans-serif, system-ui, sans-serif !important;
+.copyable-field textarea,
+.corrected-box {
+  padding: 0.65rem 2.5rem 0.65rem 0.75rem !important;
 }
 
 .result-field-label {
@@ -931,7 +939,6 @@ span[data-testid="block-info"],
   color: #111827 !important;
   border: 1px solid #d1d5db !important;
   border-radius: 10px !important;
-  padding: 0.65rem 2.5rem 0.65rem 0.75rem !important;
   min-height: 7.4rem !important;
   max-height: 12rem !important;
   overflow-y: auto !important;
@@ -946,8 +953,10 @@ span.diff-chg {
   background: #dbeafe !important;
   background-color: #dbeafe !important;
   color: inherit !important;
-  padding: 0.05em 0.12em !important;
-  border-radius: 3px !important;
+  font: inherit !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  border-radius: 2px !important;
   box-decoration-break: clone;
   -webkit-box-decoration-break: clone;
 }
@@ -1377,7 +1386,7 @@ def _corrected_display(original: str = "", corrected: str = "") -> str:
     return (
         '<div class="corrected-block">'
         '<div class="result-field-label">Corrected (native rewrite)</div>'
-        f'<div class="corrected-box">{body}</div>'
+        f'<div class="corrected-box" style="font-family: Inter, ui-sans-serif, system-ui, sans-serif;">{body}</div>'
         "</div>"
     )
 
@@ -1918,7 +1927,11 @@ def build_ui() -> gr.Blocks:
                         )
 
                         with gr.Column(elem_classes=["copyable-field"]):
-                            corrected_view = gr.HTML(value=_corrected_display())
+                            corrected_view = gr.HTML(
+                                value=_corrected_display(),
+                                padding=False,
+                                elem_classes=["corrected-html"],
+                            )
                             corrected = gr.Textbox(
                                 visible=False,
                                 show_label=False,

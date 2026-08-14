@@ -34,7 +34,7 @@ from local_lingo.validation import (
 
 class ConfigTests(unittest.TestCase):
     def test_app_name(self):
-        self.assertEqual(config.APP_NAME, "LocalLingo")
+        self.assertEqual(config.APP_NAME, "Local Lingo")
 
     def test_default_pair_format(self):
         self.assertEqual(config.DEFAULT_LANGUAGE_PAIR, "en-es")

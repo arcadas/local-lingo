@@ -1,6 +1,6 @@
 from pathlib import Path
 
-APP_NAME = "LocalLingo"
+APP_NAME = "Local Lingo"
 MODEL = "gemma3:4b"
 DEFAULT_LANGUAGE_PAIR = "en-es"
 OLLAMA_BASE_URL = "http://localhost:11434/v1"

@@ -1,17 +1,17 @@
 <p align="center">
-  <img src="./src/local_lingo/assets/icon-readme.png" width="88" alt="LocalLingo icon">
+  <img src="./src/local_lingo/assets/icon-readme.png" width="88" alt="Local Lingo icon">
 </p>
 
-<h1 align="center">LocalLingo</h1>
+<h1 align="center">Local Lingo</h1>
 
-A private, local proofreader and translator web app (**LocalLingo**). It rewrites text so it sounds natural in the detected language, then translates it to the other language in your pair — using [Ollama](https://ollama.com) on your machine.
+A private, local proofreader and translator web app (**Local Lingo**). It rewrites text so it sounds natural in the detected language, then translates it to the other language in your pair — using [Ollama](https://ollama.com) on your machine.
 
 <p align="center">
   <em>Rewrite text to sound natural, then translate it locally using Ollama.</em>
 </p>
 
 <p align="center">
-  <img src="./docs/screenshot.png" alt="LocalLingo web app: language pair, model picker, source text, and translation results" width="900">
+  <img src="./docs/screenshot.png" alt="Local Lingo web app: language pair, model picker, source text, and translation results" width="900">
 </p>
 
 ## Features

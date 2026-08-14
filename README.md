@@ -20,6 +20,8 @@ A private, local proofreader and translator web app (**Local Lingo**). It rewrit
 - Native-style rewrite, then translation
 - Local Gradio UI (no data sent to cloud APIs)
 - Copy buttons on corrected text and translation results
+- **Prompts** tab: view the real system prompt (read-only) and add an extra user instruction
+- **Benchmark** tab: last-run timing and eval rate, plus a history of the last 10 calls (saved in the browser)
 
 ## Requirements
 
@@ -122,14 +124,6 @@ Then open the URL shown in the terminal (usually [http://127.0.0.1:7860](http://
 
 If you installed with pip instead, activate the venv and run `local-lingo` (or `python -m local_lingo`).
 
-### CLI (optional)
-
-Same business logic, terminal UI:
-
-```bash
-uv run local-lingo-cli
-```
-
 ## 4. How to use the app
 
 1. Choose the two **Languages** (type to filter; full names like “English”).
@@ -142,6 +136,33 @@ uv run local-lingo-cli
    - Target language  
    - Translation  
 6. Use the **copy** buttons on the corrected and translation fields to copy results.
+
+The top nav has three pages: **Translate**, **Prompts**, and **Benchmark**.
+
+### Prompts
+
+The Prompts page shows the exact instructions sent to the model:
+
+- **System instructions** (read-only) — the guidelines from `src/local_lingo/prompts.py`. Placeholders `{name_a}` and `{name_b}` become the selected language names at run time.
+- **Extra user instruction** — optional add-on (tone, names to keep, and so on). Saved in the browser.
+- **Required result fields** — the locked three-line output format the app always appends so it can fill Detected / Corrected / Translation.
+
+Thinking is turned off on every Ollama call (`think: false`), so reasoning models such as Qwen 3 do not dump a hidden chain-of-thought into the reply.
+
+### Benchmark
+
+After a run, open **Benchmark** to compare models:
+
+- Wall time, eval rate, prompt eval rate, and token counts for the last call
+- Current Ollama settings (temperature, context, keep-alive, timeout)
+- A history of the last **10** calls (newest first), with timestamps, stored in browser `localStorage`
+- **Reset** (below the history) clears that history
+
+<p align="center">
+  <img src="./docs/screenshot-benchmark.png" alt="Benchmark tab: last-run metrics and history of the last 10 calls" width="900">
+</p>
+
+Language pair, source text, extra prompt, and benchmark history persist in the browser across reloads.
 
 ### Language selection
 
@@ -188,6 +209,7 @@ Prompts live in `src/local_lingo/prompts.py`. Parsing and Ollama calls live in `
 .
   README.md
   docs/screenshot.png
+  docs/screenshot-benchmark.png
   pyproject.toml
   app.py                     # Gradio watch-friendly entry
   src/local_lingo/           # Installable package (`import local_lingo`)
@@ -195,9 +217,9 @@ Prompts live in `src/local_lingo/prompts.py`. Parsing and Ollama calls live in `
     prompts.py               # System / user prompts
     validation.py            # Input validation
     service.py               # Business logic (Ollama + parsing)
-    ui.py                    # Gradio UI
+    ui.py                    # Gradio UI (Translate, Prompts, Benchmark)
+    highlight.py             # Word-level correction highlighting
     app.py                   # Web entry (`uv run local-lingo`)
-    cli.py                   # Terminal UI (`uv run local-lingo-cli`)
     languages.py             # Language catalog
     assets/                  # Brand icons and favicons
   tests/

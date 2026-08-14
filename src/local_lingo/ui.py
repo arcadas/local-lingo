@@ -1,11 +1,22 @@
 import base64
+import html
+import json
 import time
+from datetime import datetime
 
 import gradio as gr
 
 from . import config
-from .languages import LANGUAGE_CHOICES, codes_from_default_pair
-from .service import get_model_catalog, translate_and_correct
+from .highlight import highlight_corrections
+from .languages import CODE_TO_NAME, LANGUAGE_CHOICES, LANGUAGES, codes_from_default_pair
+from .prompts import (
+    DEFAULT_SYSTEM_GUIDELINES,
+    DEFAULT_USER_EXTRA,
+    LOCKED_OUTPUT_FORMAT,
+    LOCKED_USER_SUFFIX,
+    sanitize_prompt_addon,
+)
+from .service import RunMetrics, get_model_catalog, translate_and_correct
 from .validation import ValidationError, validate_inputs_from_languages
 
 
@@ -36,7 +47,7 @@ button, input, textarea, select, label, .prose, .block, .form {
   max-width: min(1400px, 94vw) !important;
   width: 94vw !important;
   margin: 0 auto !important;
-  padding: 1.25rem 1rem 2rem !important;
+  padding: 0.45rem 1rem 2rem !important;
 }
 
 .main-title h1 {
@@ -46,11 +57,23 @@ button, input, textarea, select, label, .prose, .block, .form {
   margin-bottom: 0.35rem !important;
 }
 
+.main-title {
+  gap: 0 !important;
+  padding: 0 !important;
+  margin: 0 !important;
+}
+
+.main-title .html-container,
+.main-title .prose {
+  margin: 0 !important;
+  padding: 0 !important;
+}
+
 .brand-row {
   display: flex !important;
   align-items: center !important;
   gap: 0.9rem !important;
-  margin-bottom: 0.9rem !important;
+  margin-bottom: 0.75rem !important;
 }
 
 .brand-row img,
@@ -71,13 +94,349 @@ button, input, textarea, select, label, .prose, .block, .form {
   font-size: 0.98rem !important;
   line-height: 1.45 !important;
   max-width: none !important;
-  margin: 0 0 0.85rem 0 !important;
+  margin: 0 0 0.12rem 0 !important;
 }
 
 .main-title code {
   background: #f3f4f6 !important;
   border: 1px solid #e5e7eb !important;
   color: #4b5563 !important;
+}
+
+#app-nav {
+  display: flex !important;
+  flex-wrap: wrap !important;
+  gap: 0.15rem 0.35rem !important;
+  align-items: flex-end !important;
+  border-bottom: 1px solid #e5e7eb !important;
+  margin: 0 0 0.7rem 0 !important;
+  padding: 0 !important;
+  background: transparent !important;
+}
+
+#app-nav > div,
+#app-nav .form,
+#app-nav .block {
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  width: auto !important;
+  flex: 0 0 auto !important;
+}
+
+#app-nav button {
+  background: transparent !important;
+  background-color: transparent !important;
+  color: #6b7280 !important;
+  border: none !important;
+  border-bottom: 2px solid transparent !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  min-height: 40px !important;
+  height: 40px !important;
+  padding: 0.35rem 0.85rem !important;
+  margin: 0 !important;
+  font-weight: 600 !important;
+  font-size: 0.95rem !important;
+}
+
+#app-nav button.primary {
+  background: transparent !important;
+  background-color: transparent !important;
+  color: #2563eb !important;
+  border-bottom: 2px solid #2563eb !important;
+  box-shadow: none !important;
+}
+
+#page-prompts,
+#page-benchmark {
+  width: 100% !important;
+}
+
+#page-benchmark,
+#page-benchmark > .column,
+#page-benchmark > .form,
+#page-benchmark > .gap,
+#page-benchmark .card,
+#page-benchmark .card > .column,
+#page-benchmark .card > .form,
+#page-benchmark .card > .gap {
+  display: flex !important;
+  flex-direction: column !important;
+  flex-wrap: nowrap !important;
+  grid-template-columns: 1fr !important;
+}
+
+#page-benchmark .card > *,
+#page-benchmark .form > *,
+#page-benchmark .gap > * {
+  width: 100% !important;
+  max-width: 100% !important;
+  grid-column: 1 / -1 !important;
+}
+
+#bench-blob,
+#bench-blob textarea {
+  display: none !important;
+  height: 0 !important;
+  overflow: hidden !important;
+}
+
+.prompt-locked {
+  background: #f9fafb !important;
+  border: 1px solid #e5e7eb !important;
+  border-radius: 10px !important;
+  padding: 0.85rem 1rem !important;
+  color: #4b5563 !important;
+  font-size: 0.875rem !important;
+  line-height: 1.5 !important;
+  white-space: pre-wrap !important;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace !important;
+}
+
+#page-prompts .prompt-readonly textarea,
+#page-prompts .prompt-readonly input {
+  background: #f9fafb !important;
+  color: #4b5563 !important;
+  cursor: default !important;
+}
+
+.benchmark-empty {
+  color: #6b7280 !important;
+  text-align: center !important;
+  padding: 2.4rem 1rem !important;
+  background: #f9fafb !important;
+  border: 1px dashed #e5e7eb !important;
+  border-radius: 12px !important;
+  font-size: 0.95rem !important;
+}
+
+.bench {
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 0.7rem !important;
+}
+
+.bench-stats {
+  display: grid !important;
+  grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+  gap: 0.55rem !important;
+}
+
+.bench-stat {
+  border: 1px solid #e5e7eb !important;
+  border-radius: 10px !important;
+  overflow: hidden !important;
+  background: #ffffff !important;
+  padding: 0 !important;
+}
+
+.bench-stat-wide {
+  grid-column: 1 / -1 !important;
+}
+
+.bench-stat-head {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  gap: 0.6rem !important;
+  background: #eff6ff !important;
+  color: #1d4ed8 !important;
+  font-size: 0.78rem !important;
+  font-weight: 600 !important;
+  padding: 0.42rem 0.8rem !important;
+}
+
+.bench-stat-wide .bench-stat-head {
+  background: #ecfdf5 !important;
+  color: #166534 !important;
+}
+
+.bench-stat-info .bench-stat-head,
+.bench-stat-wide.bench-stat-info .bench-stat-head {
+  background: #f3f4f6 !important;
+  color: #4b5563 !important;
+}
+
+.bench-info-grid {
+  display: grid !important;
+  grid-template-columns: repeat(5, minmax(0, 1fr)) !important;
+  gap: 0.55rem 1rem !important;
+}
+
+.bench-info-item {
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 0.12rem !important;
+  min-width: 0 !important;
+}
+
+.bench-info-label {
+  color: #6b7280 !important;
+  font-size: 0.72rem !important;
+  font-weight: 600 !important;
+}
+
+.bench-info-value {
+  color: #111827 !important;
+  font-size: 0.95rem !important;
+  font-weight: 700 !important;
+  font-variant-numeric: tabular-nums !important;
+  letter-spacing: -0.02em !important;
+}
+
+.bench-stat-body {
+  padding: 0.7rem 0.8rem 0.75rem !important;
+}
+
+.bench-stat-value {
+  font-size: 1.15rem !important;
+  font-weight: 700 !important;
+  letter-spacing: -0.03em !important;
+  color: #111827 !important;
+  line-height: 1.2 !important;
+  text-align: left !important;
+  font-variant-numeric: tabular-nums !important;
+}
+
+.bench-unit {
+  font-weight: 400 !important;
+  font-size: 0.8rem !important;
+  color: #6b7280 !important;
+  letter-spacing: 0 !important;
+}
+
+.bench-stat-help {
+  margin: 0.35rem 0 0 0 !important;
+  color: #6b7280 !important;
+  font-size: 0.75rem !important;
+  font-weight: 400 !important;
+  line-height: 1.4 !important;
+}
+
+.bench-model {
+  background: #ffffff !important;
+  color: #1d4ed8 !important;
+  border: 1px solid #93c5fd !important;
+  font-size: 0.75rem !important;
+  font-weight: 600 !important;
+  padding: 0.12rem 0.55rem !important;
+  border-radius: 999px !important;
+  line-height: 1.3 !important;
+  flex-shrink: 0 !important;
+}
+
+.bench-meta {
+  color: #4b5563 !important;
+  font-size: 0.82rem !important;
+  line-height: 1.45 !important;
+  margin: 0.1rem 0 0.15rem 0 !important;
+}
+
+.bench-history {
+  border: 1px solid #e5e7eb !important;
+  border-radius: 10px !important;
+  overflow: hidden !important;
+  background: #ffffff !important;
+  box-shadow: none !important;
+}
+
+.bench-history-head {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  gap: 0.6rem !important;
+  background: #eff6ff !important;
+  color: #1d4ed8 !important;
+  font-size: 0.78rem !important;
+  font-weight: 600 !important;
+  padding: 0.42rem 0.8rem !important;
+}
+
+.bench-history-title {
+  margin: 0 !important;
+  color: inherit !important;
+  font-weight: inherit !important;
+  font-size: inherit !important;
+}
+
+.bench-history-hint {
+  margin: 0 !important;
+  color: #3b82f6 !important;
+  font-size: 0.75rem !important;
+  font-weight: 500 !important;
+}
+
+.bench-grid {
+  display: grid !important;
+  grid-template-columns: 1.2fr 14% minmax(0, 1.2fr) 0.65fr 0.85fr 0.95fr 0.8fr 0.6fr !important;
+  width: 100% !important;
+  border: none !important;
+  outline: none !important;
+  box-shadow: none !important;
+  font-size: 0.8rem !important;
+}
+
+.bench-h,
+.bench-c {
+  padding: 0.48rem 0.65rem !important;
+  border: none !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+  min-width: 0 !important;
+}
+
+.bench-h {
+  color: #6b7280 !important;
+  font-weight: 600 !important;
+  font-size: 0.7rem !important;
+  text-transform: uppercase !important;
+  letter-spacing: 0.04em !important;
+  padding: 0.4rem 0.65rem !important;
+  background: #f3f4f6 !important;
+  text-align: left !important;
+}
+
+.bench-c {
+  color: #111827 !important;
+  background: #ffffff !important;
+}
+
+.bench-h.num,
+.bench-c.num {
+  text-align: right !important;
+  font-variant-numeric: tabular-nums !important;
+}
+
+.bench-c.num {
+  font-weight: 600 !important;
+}
+
+.bench-c.odd {
+  background: #f3f4f6 !important;
+}
+
+.bench-preview {
+  color: #6b7280 !important;
+  font-weight: 400 !important;
+}
+
+@media (max-width: 800px) {
+  .bench-stats {
+    grid-template-columns: 1fr !important;
+  }
+
+  .bench-info-grid {
+    grid-template-columns: 1fr 1fr !important;
+  }
+
+  .bench-grid {
+    grid-template-columns: 0.9fr 1fr 1.1fr 0.65fr 0.8fr 0.85fr 0.8fr 0.6fr !important;
+    overflow-x: auto !important;
+  }
 }
 
 .layout-row {
@@ -146,7 +505,6 @@ button, input, textarea, select, label, .prose, .block, .form {
   padding: 0 !important;
 }
 
-#right-card .html-container,
 #right-card > .grow,
 #right-card > div:has(.result-placeholder),
 #right-card > div:has(.loading-box) {
@@ -171,11 +529,14 @@ label span,
   padding-right: 0 !important;
 }
 
-input, textarea {
+input, textarea, select {
   background: #ffffff !important;
   color: #111827 !important;
   border: 1px solid #d1d5db !important;
   border-radius: 10px !important;
+  font-size: 0.875rem !important;
+  line-height: 1.5 !important;
+  font-weight: 400 !important;
 }
 
 textarea {
@@ -213,6 +574,62 @@ button.primary {
 button.primary:hover {
   background: #1d4ed8 !important;
   color: #ffffff !important;
+}
+
+#page-prompts .prompt-actions {
+  gap: 0.75rem !important;
+  align-items: stretch !important;
+}
+
+#page-prompts .prompt-actions button {
+  min-height: 46px !important;
+  height: 46px !important;
+  margin-top: 0.55rem !important;
+  border-radius: 10px !important;
+  font-weight: 650 !important;
+  font-size: 0.95rem !important;
+  padding: 0 1rem !important;
+}
+
+#page-prompts .prompt-actions button:not(.primary) {
+  background: #ffffff !important;
+  color: #111827 !important;
+  border: 1px solid #d1d5db !important;
+  box-shadow: none !important;
+}
+
+#page-prompts .prompt-actions button:not(.primary):hover {
+  background: #f9fafb !important;
+  border-color: #9ca3af !important;
+}
+
+#bench-reset,
+#bench-reset button,
+#page-benchmark .bench-reset-btn,
+#page-benchmark .bench-reset-btn button {
+  display: block !important;
+  width: 100% !important;
+  box-sizing: border-box !important;
+  min-height: 42px !important;
+  height: 42px !important;
+  margin: 0.75rem 0 0 0 !important;
+  padding: 0 1rem !important;
+  border-radius: 10px !important;
+  background: #fef2f2 !important;
+  color: #b91c1c !important;
+  border: 1px solid #fecaca !important;
+  box-shadow: none !important;
+  font-weight: 600 !important;
+  font-size: 0.9rem !important;
+  cursor: pointer !important;
+}
+
+#bench-reset:hover,
+#bench-reset button:hover,
+#page-benchmark .bench-reset-btn:hover,
+#page-benchmark .bench-reset-btn button:hover {
+  background: #fee2e2 !important;
+  border-color: #fca5a5 !important;
 }
 
 .result-placeholder {
@@ -300,7 +717,7 @@ button.primary:hover {
 
 .form-message .msg-warn {
   color: #92400e !important;
-  background: #fef3c7 !important;
+  background: #dbeafe !important;
   border: 1px solid #fcd34d !important;
   border-radius: 10px !important;
   padding: 0.65rem 0.85rem !important;
@@ -391,6 +808,8 @@ button.primary:hover {
   min-height: 42px !important;
   color: #111827 !important;
   padding: 0.55rem 0.75rem !important;
+  font-size: 0.875rem !important;
+  line-height: 1.5 !important;
 }
 
 .lang-row input:focus,
@@ -475,10 +894,72 @@ span[data-testid="block-info"],
   position: relative !important;
 }
 
-.copyable-field textarea {
+.copyable-field textarea,
+.corrected-box {
   padding-top: 0.65rem !important;
   padding-right: 2.5rem !important;
   padding-bottom: 0.65rem !important;
+  font-size: 0.875rem !important;
+  font-weight: 400 !important;
+  line-height: 1.5 !important;
+  letter-spacing: normal !important;
+  color: #111827 !important;
+  font-family: Inter, ui-sans-serif, system-ui, sans-serif !important;
+}
+
+.copyable-field .prose,
+.copyable-field .html-container .corrected-box,
+.corrected-box,
+.corrected-box * {
+  font-size: 0.875rem !important;
+  line-height: 1.5 !important;
+  font-family: Inter, ui-sans-serif, system-ui, sans-serif !important;
+}
+
+.result-field-label {
+  margin: 0 0 0.25rem 0 !important;
+  padding: 0 !important;
+  color: #111827 !important;
+  font-weight: 600 !important;
+  font-size: 0.95rem !important;
+  line-height: 1.4 !important;
+  font-family: Inter, ui-sans-serif, system-ui, sans-serif !important;
+}
+
+.corrected-box {
+  background: #ffffff !important;
+  color: #111827 !important;
+  border: 1px solid #d1d5db !important;
+  border-radius: 10px !important;
+  padding: 0.65rem 2.5rem 0.65rem 0.75rem !important;
+  min-height: 7.4rem !important;
+  max-height: 12rem !important;
+  overflow-y: auto !important;
+  white-space: pre-wrap !important;
+  overflow-wrap: break-word !important;
+  box-sizing: border-box !important;
+}
+
+.corrected-box .diff-chg,
+.prose .diff-chg,
+span.diff-chg {
+  background: #dbeafe !important;
+  background-color: #dbeafe !important;
+  color: inherit !important;
+  padding: 0.05em 0.12em !important;
+  border-radius: 3px !important;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+
+#corrected-plain,
+#corrected-plain textarea {
+  display: none !important;
+  height: 0 !important;
+  min-height: 0 !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  border: none !important;
 }
 
 .modern-copy-btn {
@@ -565,6 +1046,10 @@ FORCE_LIGHT_HEAD = """
     background: #eff6ff !important;
     color: #1d4ed8 !important;
   }
+  .diff-chg {
+    background: #dbeafe !important;
+    background-color: #dbeafe !important;
+  }
 </style>
 <script>
 document.documentElement.classList.remove("dark");
@@ -576,11 +1061,11 @@ darkObserver.observe(document.documentElement, { attributes: true, attributeFilt
 
 function positionCopyButtons() {
   document.querySelectorAll(".copyable-field").forEach((field) => {
-    const textarea = field.querySelector("textarea");
+    const box = field.querySelector(".corrected-box") || field.querySelector("textarea");
     const btn = field.querySelector("button.modern-copy-btn");
-    if (!textarea || !btn) return;
+    if (!box || !btn) return;
     const fieldRect = field.getBoundingClientRect();
-    const taRect = textarea.getBoundingClientRect();
+    const taRect = box.getBoundingClientRect();
     // 12px inset from the textarea's top/right edges (inside the box)
     const top = taRect.top - fieldRect.top + 12;
     const right = fieldRect.right - taRect.right + 10;
@@ -640,6 +1125,41 @@ if (document.readyState === "loading") {
 } else {
   tickLoader();
 }
+
+let skipBenchPersistUntil = 0;
+function persistBenchHistory() {
+  if (Date.now() < skipBenchPersistUntil) return;
+  const sources = [
+    document.getElementById("bench-persist"),
+    document.querySelector("#bench-blob textarea"),
+    document.querySelector("#bench-blob input"),
+  ];
+  for (const el of sources) {
+    if (!el) continue;
+    const raw = (el.textContent || el.value || "").trim();
+    if (!raw || raw === "[]") continue;
+    try {
+      const rows = JSON.parse(raw);
+      if (Array.isArray(rows) && rows.length) {
+        localStorage.setItem("local-lingo-bench", JSON.stringify(rows.slice(0, 10)));
+        return;
+      }
+    } catch (e) {}
+  }
+}
+const benchPersistObserver = new MutationObserver(persistBenchHistory);
+window.addEventListener("load", () => {
+  persistBenchHistory();
+  benchPersistObserver.observe(document.body, { childList: true, subtree: true, characterData: true });
+});
+setInterval(persistBenchHistory, 800);
+if (document.readyState !== "loading") persistBenchHistory();
+
+document.addEventListener("click", (e) => {
+  if (!e.target.closest("#bench-reset")) return;
+  skipBenchPersistUntil = Date.now() + 2500;
+  try { localStorage.removeItem("local-lingo-bench"); } catch (err) {}
+});
 </script>
 """
 
@@ -713,6 +1233,115 @@ COPY_JS = """
 }
 """
 
+SAVE_PREFS_JS = """
+(lang_a, lang_b, text) => {
+  try {
+    localStorage.setItem("local-lingo-prefs", JSON.stringify({
+      lang_a: lang_a || "",
+      lang_b: lang_b || "",
+      text: (text || "").slice(0, 50000)
+    }));
+  } catch (e) {}
+}
+"""
+
+RESTORE_PREFS_JS = """
+(lang_a, lang_b, text) => {
+  try {
+    const p = JSON.parse(localStorage.getItem("local-lingo-prefs") || "{}");
+    return [
+      p.lang_a || lang_a || "",
+      p.lang_b || lang_b || "",
+      typeof p.text === "string" ? p.text : (text || "")
+    ];
+  } catch (e) {
+    return [lang_a || "", lang_b || "", text || ""];
+  }
+}
+"""
+
+SAVE_PROMPTS_JS = """
+(_system_g, user_e) => {
+  try {
+    localStorage.setItem("local-lingo-prompts", JSON.stringify({
+      user_extra: (user_e || "").slice(0, 4000)
+    }));
+  } catch (e) {}
+}
+"""
+
+RESTORE_BENCH_JS = """
+(blob, history, html) => {
+  try {
+    const saved = localStorage.getItem("local-lingo-bench");
+    if (!saved) return [blob || "[]", history, html];
+    const rows = JSON.parse(saved);
+    if (!Array.isArray(rows)) return [blob || "[]", history, html];
+    return [saved, history, html];
+  } catch (e) {
+    return [blob || "[]", history, html];
+  }
+}
+"""
+
+SAVE_BENCH_JS = """
+(blob) => {
+  try {
+    const rows = JSON.parse(blob || "[]");
+    if (Array.isArray(rows) && rows.length) {
+      localStorage.setItem("local-lingo-bench", JSON.stringify(rows.slice(0, 10)));
+    }
+  } catch (e) {}
+}
+"""
+
+RESET_BENCH_JS = """
+() => {
+  try {
+    localStorage.removeItem("local-lingo-bench");
+  } catch (e) {}
+}
+"""
+
+RESTORE_PROMPTS_JS = """
+(system_g, user_e) => {
+  try {
+    const p = JSON.parse(localStorage.getItem("local-lingo-prompts") || "{}");
+    return [
+      system_g || "",
+      typeof p.user_extra === "string" ? p.user_extra : (user_e || "")
+    ];
+  } catch (e) {
+    return [system_g || "", user_e || ""];
+  }
+}
+"""
+
+_PREFS_TEXT_LIMIT = 50_000
+
+
+def _normalize_saved_lang(value: str, default: str) -> str:
+    raw = (value or "").strip()
+    if raw in CODE_TO_NAME:
+        return raw
+    lower = raw.lower()
+    for name, code in LANGUAGES.items():
+        if name.lower() == lower:
+            return code
+    return default
+
+
+def _restore_session(lang_a: str, lang_b: str, text: str):
+    default_a, default_b = codes_from_default_pair(config.DEFAULT_LANGUAGE_PAIR)
+    a = _normalize_saved_lang(lang_a, default_a)
+    b = _normalize_saved_lang(lang_b, default_b)
+    if a == b:
+        a, b = default_a, default_b
+    saved = text if isinstance(text, str) else ""
+    if len(saved) > _PREFS_TEXT_LIMIT:
+        saved = saved[:_PREFS_TEXT_LIMIT]
+    return a, b, saved
+
 
 def _message_html(text: str = "", kind: str = "error") -> str:
     if not text:
@@ -743,6 +1372,318 @@ def _timing_html(seconds: float | None = None) -> str:
     return f'<p class="run-timing">Completed in {_format_elapsed(seconds)}</p>'
 
 
+def _corrected_display(original: str = "", corrected: str = "") -> str:
+    body = highlight_corrections(original, corrected)
+    return (
+        '<div class="corrected-block">'
+        '<div class="result-field-label">Corrected (native rewrite)</div>'
+        f'<div class="corrected-box">{body}</div>'
+        "</div>"
+    )
+
+
+def _fmt_seconds(seconds: float) -> str:
+    if seconds <= 0:
+        return "—"
+    if seconds < 0.01:
+        return f"{seconds * 1000:.1f}ms"
+    return _format_elapsed(seconds)
+
+
+def _fmt_rate(rate: float | None) -> str:
+    if rate is None:
+        return "—"
+    if rate >= 100:
+        return f"{rate:.0f} tokens/s"
+    return f"{rate:.1f} tokens/s"
+
+
+def _fmt_ns(duration_ns: int) -> str:
+    return _fmt_seconds(duration_ns / 1_000_000_000)
+
+
+def _fmt_rate_num(rate: float | None) -> str:
+    if rate is None:
+        return "—"
+    if rate >= 100:
+        return f"{rate:.0f}"
+    return f"{rate:.1f}"
+
+
+_BENCH_HISTORY_LIMIT = 10
+
+
+def _fmt_when(value: object) -> str:
+    raw = str(value or "").strip()
+    if not raw:
+        return "—"
+    try:
+        dt = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError:
+        return "—"
+    if dt.tzinfo is not None:
+        dt = dt.astimezone()
+    return dt.strftime("%d %b %H:%M:%S")
+
+
+def _history_entry(
+    metrics: RunMetrics,
+    text: str,
+    pair: str,
+    ok: bool = True,
+) -> dict:
+    preview = " ".join((text or "").split())
+    if len(preview) > 42:
+        preview = preview[:42].rstrip() + "…"
+    load_s = (metrics.load_duration_ns or 0) / 1_000_000_000
+    return {
+        "model": metrics.model or "",
+        "pair": pair or "",
+        "preview": preview,
+        "wall": round(float(metrics.wall_seconds or 0), 2),
+        "eval_rate": metrics.eval_rate,
+        "prompt_eval_rate": metrics.prompt_eval_rate,
+        "prompt_tokens": int(metrics.prompt_eval_count or 0),
+        "eval_tokens": int(metrics.eval_count or 0),
+        "load_s": round(load_s, 2),
+        "ok": bool(ok),
+        "at": datetime.now().astimezone().isoformat(timespec="seconds"),
+    }
+
+
+def _append_history(history: list | None, entry: dict) -> list:
+    rows = [entry]
+    for item in _normalize_history(history):
+        rows.append(item)
+        if len(rows) >= _BENCH_HISTORY_LIMIT:
+            break
+    return rows[:_BENCH_HISTORY_LIMIT]
+
+
+def _normalize_history(history: list | dict | None) -> list:
+    if isinstance(history, dict):
+        history = [history]
+    rows: list[dict] = []
+    for item in history or []:
+        if isinstance(item, dict) and (item.get("model") or item.get("wall") is not None):
+            rows.append(item)
+        if len(rows) >= _BENCH_HISTORY_LIMIT:
+            break
+    return rows
+
+
+def _history_blob(history: list | dict | None) -> str:
+    return json.dumps(_normalize_history(history), separators=(",", ":"))
+
+
+def _restore_bench_history(history: list | dict | None):
+    rows = _normalize_history(history)
+    return rows, _benchmark_html(history=rows)
+
+
+def _restore_bench_from_blob(blob: str):
+    try:
+        data = json.loads(blob or "[]")
+    except (TypeError, json.JSONDecodeError, ValueError):
+        data = []
+    return _restore_bench_history(data)
+
+
+def _restore_bench_pack(blob: str, _history=None, _html=None):
+    rows, markup = _restore_bench_from_blob(blob)
+    return _history_blob(rows), rows, markup
+
+
+def _bench_persist_html(rows: list) -> str:
+    payload = html.escape(
+        json.dumps(rows[:_BENCH_HISTORY_LIMIT], separators=(",", ":")),
+        quote=True,
+    )
+    return f'<div id="bench-persist" hidden>{payload}</div>'
+
+
+def _bench_info_card() -> str:
+    timeout = config.REQUEST_TIMEOUT_SECONDS
+    timeout_label = (
+        f"{int(timeout)}s" if timeout == int(timeout) else f"{timeout:g}s"
+    )
+    items = (
+        ("Temperature", str(config.TEMPERATURE)),
+        ("Context (num_ctx)", f"{config.NUM_CTX:,}"),
+        ("Keep alive", str(config.KEEP_ALIVE)),
+        ("Timeout", timeout_label),
+        ("Think", "off"),
+    )
+    cells = "".join(
+        '<div class="bench-info-item">'
+        f'<span class="bench-info-label">{html.escape(label)}</span>'
+        f'<span class="bench-info-value">{html.escape(value)}</span>'
+        "</div>"
+        for label, value in items
+    )
+    return (
+        '<div class="bench-stat bench-stat-wide bench-stat-info">'
+        '<div class="bench-stat-head">Settings</div>'
+        '<div class="bench-stat-body">'
+        f'<div class="bench-info-grid">{cells}</div>'
+        '<p class="bench-stat-help">'
+        "Ollama options sent with every request. Edit temperature, context, "
+        "keep alive, and timeout in <code>config.py</code>. Thinking stays off."
+        "</p>"
+        "</div></div>"
+    )
+
+
+def _benchmark_html(history: list | None = None, note: str = "") -> str:
+    rows = _normalize_history(history)
+    if not rows:
+        return (
+            '<div class="benchmark-empty">'
+            "Run a translation to see timing, eval rate, and a history of the last 10 calls."
+            "</div>"
+        )
+
+    latest = rows[0]
+    model = latest.get("model") or "—"
+    wall = float(latest.get("wall") or 0)
+    prompt_tokens = int(latest.get("prompt_tokens") or 0)
+    eval_tokens = int(latest.get("eval_tokens") or 0)
+    load_s = float(latest.get("load_s") or 0)
+    prompt_rate_num = _fmt_rate_num(latest.get("prompt_eval_rate"))
+    eval_rate_num = _fmt_rate_num(latest.get("eval_rate"))
+    total_tokens = prompt_tokens + eval_tokens
+    note_html = ""
+    if note:
+        note_html = (
+            f'<p class="lang-section-hint" style="margin:0">{html.escape(note[:400])}</p>'
+        )
+
+    def cell(text: str, *, num: bool = False, extra: str = "", title: str = "") -> str:
+        classes = "bench-c"
+        if num:
+            classes += " num"
+        if extra:
+            classes += f" {extra}"
+        title_attr = f' title="{title}"' if title else ""
+        return f'<div class="{classes}"{title_attr}>{text}</div>'
+
+    grid_cells = [
+        '<div class="bench-h">When</div>',
+        '<div class="bench-h">Model</div>',
+        '<div class="bench-h">Input</div>',
+        '<div class="bench-h num">Wall</div>',
+        '<div class="bench-h num">Eval rate</div>',
+        '<div class="bench-h num">Prompt eval</div>',
+        '<div class="bench-h num">In / out</div>',
+        '<div class="bench-h num">Load</div>',
+    ]
+    for index, item in enumerate(rows):
+        stripe = "odd" if index % 2 else "even"
+        when = _fmt_when(item.get("at"))
+        preview = html.escape(str(item.get("preview") or "—"))
+        grid_cells.extend(
+            [
+                cell(html.escape(when), extra=stripe, title=html.escape(str(item.get("at") or ""))),
+                cell(html.escape(str(item.get("model") or "—")), extra=stripe),
+                cell(preview, extra=f"bench-preview {stripe}", title=preview),
+                cell(_format_elapsed(float(item.get("wall") or 0)), num=True, extra=stripe),
+                cell(_fmt_rate_num(item.get("eval_rate")), num=True, extra=stripe),
+                cell(_fmt_rate_num(item.get("prompt_eval_rate")), num=True, extra=stripe),
+                cell(
+                    f"{int(item.get('prompt_tokens') or 0)} / {int(item.get('eval_tokens') or 0)}",
+                    num=True,
+                    extra=stripe,
+                ),
+                cell(_fmt_seconds(float(item.get("load_s") or 0)), num=True, extra=stripe),
+            ]
+        )
+
+    unit = '<span class="bench-unit"> tokens/s</span>'
+    model_badge = f'<span class="bench-model">{html.escape(str(model))}</span>'
+    persist = _bench_persist_html(rows)
+    return f"""
+<div class="bench">
+  {persist}
+  <div class="bench-stats">
+    <div class="bench-stat bench-stat-wide">
+      <div class="bench-stat-head"><span>Wall time</span>{model_badge}</div>
+      <div class="bench-stat-body">
+        <div class="bench-stat-value">{_format_elapsed(wall)}</div>
+        <p class="bench-stat-help">Time from clicking Correct &amp; Translate until the result appeared, including model load.</p>
+      </div>
+    </div>
+    {_bench_info_card()}
+    <div class="bench-stat">
+      <div class="bench-stat-head">Eval rate</div>
+      <div class="bench-stat-body">
+        <div class="bench-stat-value">{eval_rate_num}{unit}</div>
+        <p class="bench-stat-help">How fast the model wrote the reply (generated tokens per second).</p>
+      </div>
+    </div>
+    <div class="bench-stat">
+      <div class="bench-stat-head">Prompt eval rate</div>
+      <div class="bench-stat-body">
+        <div class="bench-stat-value">{prompt_rate_num}{unit}</div>
+        <p class="bench-stat-help">How fast the model read your input before generating.</p>
+      </div>
+    </div>
+    <div class="bench-stat">
+      <div class="bench-stat-head">Total tokens</div>
+      <div class="bench-stat-body">
+        <div class="bench-stat-value">{total_tokens}</div>
+        <p class="bench-stat-help">Prompt tokens plus generated tokens for this request.</p>
+      </div>
+    </div>
+  </div>
+  <p class="bench-meta">Prompt used {prompt_tokens} tokens. The model generated {eval_tokens} tokens. Loading the model took {_fmt_seconds(load_s)}.</p>
+  {note_html}
+  <div class="bench-history">
+    <div class="bench-history-head">
+      <p class="bench-history-title">History</p>
+      <p class="bench-history-hint">Last {len(rows)} · newest first</p>
+    </div>
+    <div class="bench-grid">{"".join(grid_cells)}</div>
+  </div>
+</div>
+"""
+
+
+def _reset_benchmark():
+    return [], _benchmark_html(), "[]"
+
+
+def _locked_prompt_preview() -> str:
+    locked = html.escape(LOCKED_OUTPUT_FORMAT.strip())
+    suffix = html.escape(LOCKED_USER_SUFFIX)
+    return (
+        '<p class="lang-section-label">Required result fields</p>'
+        '<p class="lang-section-hint">'
+        "Always appended so the app can fill the result boxes. These labels cannot be edited."
+        "</p>"
+        f'<div class="prompt-locked">{locked}\n\n{suffix}</div>'
+    )
+
+
+def _show_page(page: str):
+    return (
+        gr.update(visible=page == "translate"),
+        gr.update(visible=page == "prompts"),
+        gr.update(visible=page == "benchmark"),
+        gr.update(variant="primary" if page == "translate" else "secondary"),
+        gr.update(variant="primary" if page == "prompts" else "secondary"),
+        gr.update(variant="primary" if page == "benchmark" else "secondary"),
+    )
+
+
+def _save_prompts(_system_g: str, user_e: str):
+    extra_clean = sanitize_prompt_addon(user_e)
+    return DEFAULT_SYSTEM_GUIDELINES, extra_clean, "Saved. The next run will use this extra instruction."
+
+
+def _reset_prompts():
+    return DEFAULT_SYSTEM_GUIDELINES, DEFAULT_USER_EXTRA, "Cleared the extra user instruction."
+
+
 def _empty_results():
     return (
         gr.update(visible=True, value=PLACEHOLDER_HTML),
@@ -754,11 +1695,20 @@ def _empty_results():
     )
 
 
-def _run(text: str, lang_a: str, lang_b: str, model: str | None = None):
+def _run(
+    text: str,
+    lang_a: str,
+    lang_b: str,
+    model: str | None = None,
+    system_guidelines: str | None = None,
+    user_extra: str | None = None,
+    history: list | None = None,
+):
+    history = _normalize_history(history)
     try:
         cleaned, pair = validate_inputs_from_languages(text, lang_a, lang_b)
     except ValidationError as exc:
-        yield (*_empty_results(), _message_html(str(exc)), _timing_html())
+        yield (*_empty_results(), _message_html(str(exc)), _timing_html(), "", gr.update(), history, _history_blob(history))
         return
 
     chosen_model = (model or "").strip()
@@ -768,6 +1718,10 @@ def _run(text: str, lang_a: str, lang_b: str, model: str | None = None):
             *_empty_results(),
             _message_html(catalog.warning, kind="warn"),
             _timing_html(),
+            "",
+            gr.update(),
+            history,
+            _history_blob(history),
         )
         return
     if chosen_model not in catalog.choices:
@@ -782,13 +1736,41 @@ def _run(text: str, lang_a: str, lang_b: str, model: str | None = None):
         "",
         _message_html(""),
         _timing_html(),
+        "",
+        gr.update(),
+        history,
+        _history_blob(history),
     )
 
     started = time.perf_counter()
-    result = translate_and_correct(cleaned, pair, model=chosen_model)
+    result = translate_and_correct(
+        cleaned,
+        pair,
+        model=chosen_model,
+        system_guidelines=DEFAULT_SYSTEM_GUIDELINES,
+        user_extra=user_extra,
+    )
     elapsed = time.perf_counter() - started
-    if result.note and (not result.corrected or result.corrected == "?"):
-        yield (*_empty_results(), _message_html(result.note), _timing_html(elapsed))
+    result.metrics.wall_seconds = elapsed
+    if not result.metrics.model:
+        result.metrics.model = chosen_model
+    failed = bool(result.note and (not result.corrected or result.corrected == "?"))
+    history = _append_history(
+        history,
+        _history_entry(result.metrics, cleaned, pair, ok=not failed),
+    )
+    bench = _benchmark_html(history=history, note=result.note if failed else "")
+
+    if failed:
+        yield (
+            *_empty_results(),
+            _message_html(result.note),
+            _timing_html(elapsed),
+            "",
+            bench,
+            history,
+            _history_blob(history),
+        )
         return
 
     yield (
@@ -800,6 +1782,10 @@ def _run(text: str, lang_a: str, lang_b: str, model: str | None = None):
         result.translation,
         _message_html(""),
         _timing_html(elapsed),
+        _corrected_display(cleaned, result.corrected),
+        bench,
+        history,
+        _history_blob(history),
     )
 
 
@@ -857,110 +1843,166 @@ def build_ui() -> gr.Blocks:
         head=_page_head(),
         fill_width=True,
     ) as demo:
+        bench_history = gr.State([])
+        bench_blob = gr.Textbox(value="[]", visible=False, elem_id="bench-blob")
         with gr.Column(elem_classes=["main-title"]):
             gr.HTML(_brand_header_html())
 
-        with gr.Row(elem_classes=["layout-row"]):
-            with gr.Column(scale=1, min_width=320, elem_id="left-card", elem_classes=["card"]):
-                default_a, default_b = codes_from_default_pair(config.DEFAULT_LANGUAGE_PAIR)
+        with gr.Row(elem_id="app-nav"):
+            nav_translate = gr.Button("Translate", variant="primary")
+            nav_prompts = gr.Button("Prompts")
+            nav_benchmark = gr.Button("Benchmark")
+
+        with gr.Column(visible=True, elem_id="page-translate") as page_translate:
+            with gr.Row(elem_classes=["layout-row"]):
+                with gr.Column(scale=1, min_width=320, elem_id="left-card", elem_classes=["card"]):
+                    default_a, default_b = codes_from_default_pair(config.DEFAULT_LANGUAGE_PAIR)
+                    gr.HTML(
+                        """
+                        <p class="lang-section-label">Languages</p>
+                        <p class="lang-section-hint">Bidirectional pair — paste text in either language. No direction to choose.</p>
+                        """
+                    )
+                    with gr.Row(elem_classes=["lang-row"]):
+                        lang_a = gr.Dropdown(
+                            choices=LANGUAGE_CHOICES,
+                            value=default_a,
+                            show_label=False,
+                            filterable=True,
+                            allow_custom_value=False,
+                            container=False,
+                            elem_classes=["lang-select"],
+                        )
+                        gr.HTML('<div class="lang-arrow" aria-hidden="true">⇄</div>')
+                        lang_b = gr.Dropdown(
+                            choices=LANGUAGE_CHOICES,
+                            value=default_b,
+                            show_label=False,
+                            filterable=True,
+                            allow_custom_value=False,
+                            container=False,
+                            elem_classes=["lang-select"],
+                        )
+                    gr.HTML('<p class="lang-section-label">Model</p>')
+                    model_hint = gr.HTML(value=_model_hint_html())
+                    with gr.Row(elem_classes=["model-row"]):
+                        model = gr.Dropdown(
+                            choices=[],
+                            value=None,
+                            show_label=False,
+                            filterable=True,
+                            allow_custom_value=False,
+                            container=False,
+                            interactive=False,
+                            elem_classes=["model-select"],
+                        )
+                    text = gr.Textbox(
+                        lines=8,
+                        max_lines=8,
+                        label="Your text",
+                        placeholder="Paste text in either language of the pair…",
+                        autoscroll=True,
+                    )
+                    btn = gr.Button("Correct & Translate", variant="primary")
+                    form_message = gr.HTML(value=_message_html())
+
+                with gr.Column(scale=1, min_width=320, elem_id="right-card", elem_classes=["card"]):
+                    placeholder = gr.HTML(value=PLACEHOLDER_HTML, visible=True)
+                    with gr.Column(visible=False, elem_id="results-stack") as results:
+                        detected = gr.Textbox(
+                            label="Detected language",
+                            interactive=False,
+                            lines=1,
+                            max_lines=1,
+                            elem_classes=["lang-name-field"],
+                        )
+
+                        with gr.Column(elem_classes=["copyable-field"]):
+                            corrected_view = gr.HTML(value=_corrected_display())
+                            corrected = gr.Textbox(
+                                visible=False,
+                                show_label=False,
+                                elem_id="corrected-plain",
+                            )
+                            copy_corrected = gr.Button(
+                                "Copy",
+                                elem_classes=["modern-copy-btn"],
+                                size="sm",
+                            )
+
+                        target = gr.Textbox(
+                            label="Target language",
+                            interactive=False,
+                            lines=1,
+                            max_lines=1,
+                            elem_classes=["lang-name-field"],
+                        )
+
+                        with gr.Column(elem_classes=["copyable-field"]):
+                            translation = gr.Textbox(
+                                lines=5,
+                                max_lines=5,
+                                label="Translation",
+                                interactive=False,
+                                show_copy_button=False,
+                                autoscroll=True,
+                            )
+                            copy_translation = gr.Button(
+                                "Copy",
+                                elem_classes=["modern-copy-btn"],
+                                size="sm",
+                            )
+                        run_timing = gr.HTML(value=_timing_html())
+
+        with gr.Column(visible=False, elem_id="page-prompts") as page_prompts:
+            with gr.Column(elem_classes=["card"]):
                 gr.HTML(
                     """
-                    <p class="lang-section-label">Languages</p>
-                    <p class="lang-section-hint">Bidirectional pair — paste text in either language. No direction to choose.</p>
+                    <p class="lang-section-label">Prompt instructions</p>
+                    <p class="lang-section-hint">
+                    Add an extra user instruction if you want. The system prompt is shown for
+                    reference and cannot be edited yet. Placeholders
+                    <code>{name_a}</code> and <code>{name_b}</code> become the selected language names.
+                    </p>
                     """
                 )
-                with gr.Row(elem_classes=["lang-row"]):
-                    lang_a = gr.Dropdown(
-                        choices=LANGUAGE_CHOICES,
-                        value=default_a,
-                        show_label=False,
-                        filterable=True,
-                        allow_custom_value=False,
-                        container=False,
-                        elem_classes=["lang-select"],
-                    )
-                    gr.HTML('<div class="lang-arrow" aria-hidden="true">⇄</div>')
-                    lang_b = gr.Dropdown(
-                        choices=LANGUAGE_CHOICES,
-                        value=default_b,
-                        show_label=False,
-                        filterable=True,
-                        allow_custom_value=False,
-                        container=False,
-                        elem_classes=["lang-select"],
-                    )
-                gr.HTML('<p class="lang-section-label">Model</p>')
-                model_hint = gr.HTML(value=_model_hint_html())
-                with gr.Row(elem_classes=["model-row"]):
-                    model = gr.Dropdown(
-                        choices=[],
-                        value=None,
-                        show_label=False,
-                        filterable=True,
-                        allow_custom_value=False,
-                        container=False,
-                        interactive=False,
-                        elem_classes=["model-select"],
-                    )
-                text = gr.Textbox(
-                    lines=8,
-                    max_lines=8,
-                    label="Your text",
-                    placeholder="Paste text in either language of the pair…",
-                    autoscroll=True,
+                system_guidelines = gr.Textbox(
+                    label="System instructions (read-only)",
+                    value=DEFAULT_SYSTEM_GUIDELINES,
+                    lines=12,
+                    max_lines=20,
+                    interactive=False,
+                    elem_classes=["prompt-readonly"],
                 )
-                btn = gr.Button("Correct & Translate", variant="primary")
-                form_message = gr.HTML(value=_message_html())
+                user_extra = gr.Textbox(
+                    label="Extra user instruction (optional)",
+                    value=DEFAULT_USER_EXTRA,
+                    lines=4,
+                    max_lines=8,
+                    placeholder="e.g. Prefer a formal tone. Keep names unchanged.",
+                )
+                gr.HTML(_locked_prompt_preview())
+                with gr.Row(elem_classes=["prompt-actions"]):
+                    save_prompts_btn = gr.Button("Save instructions", variant="primary")
+                    reset_prompts_btn = gr.Button("Reset to defaults")
+                prompt_status = gr.HTML(value=_message_html())
 
-            with gr.Column(scale=1, min_width=320, elem_id="right-card", elem_classes=["card"]):
-                placeholder = gr.HTML(value=PLACEHOLDER_HTML, visible=True)
-                with gr.Column(visible=False, elem_id="results-stack") as results:
-                    detected = gr.Textbox(
-                        label="Detected language",
-                        interactive=False,
-                        lines=1,
-                        max_lines=1,
-                        elem_classes=["lang-name-field"],
-                    )
-
-                    with gr.Column(elem_classes=["copyable-field"]):
-                        corrected = gr.Textbox(
-                            lines=5,
-                            max_lines=5,
-                            label="Corrected (native rewrite)",
-                            interactive=False,
-                            show_copy_button=False,
-                            autoscroll=True,
-                        )
-                        copy_corrected = gr.Button(
-                            "Copy",
-                            elem_classes=["modern-copy-btn"],
-                            size="sm",
-                        )
-
-                    target = gr.Textbox(
-                        label="Target language",
-                        interactive=False,
-                        lines=1,
-                        max_lines=1,
-                        elem_classes=["lang-name-field"],
-                    )
-
-                    with gr.Column(elem_classes=["copyable-field"]):
-                        translation = gr.Textbox(
-                            lines=5,
-                            max_lines=5,
-                            label="Translation",
-                            interactive=False,
-                            show_copy_button=False,
-                            autoscroll=True,
-                        )
-                        copy_translation = gr.Button(
-                            "Copy",
-                            elem_classes=["modern-copy-btn"],
-                            size="sm",
-                        )
-                    run_timing = gr.HTML(value=_timing_html())
+        with gr.Column(visible=False, elem_id="page-benchmark") as page_benchmark:
+            with gr.Column(elem_classes=["card"]):
+                gr.HTML(
+                    """
+                    <p class="lang-section-label">Last run</p>
+                    <p class="lang-section-hint">
+                    Timing, eval rate, and a history of the last 10 calls — useful for comparing models.
+                    </p>
+                    """
+                )
+                benchmark_view = gr.HTML(value=_benchmark_html())
+            reset_bench_btn = gr.Button(
+                "Reset",
+                elem_id="bench-reset",
+                elem_classes=["bench-reset-btn"],
+            )
 
         copy_corrected.click(
             fn=None,
@@ -975,9 +2017,65 @@ def build_ui() -> gr.Blocks:
             show_progress="hidden",
         )
 
+        for component in (lang_a, lang_b, text):
+            component.change(
+                fn=None,
+                inputs=[lang_a, lang_b, text],
+                js=SAVE_PREFS_JS,
+                show_progress="hidden",
+            )
+
+        nav_translate.click(
+            fn=lambda: _show_page("translate"),
+            outputs=[page_translate, page_prompts, page_benchmark, nav_translate, nav_prompts, nav_benchmark],
+            show_progress="hidden",
+        )
+        nav_prompts.click(
+            fn=lambda: _show_page("prompts"),
+            outputs=[page_translate, page_prompts, page_benchmark, nav_translate, nav_prompts, nav_benchmark],
+            show_progress="hidden",
+        )
+        nav_benchmark.click(
+            fn=lambda: _show_page("benchmark"),
+            outputs=[page_translate, page_prompts, page_benchmark, nav_translate, nav_prompts, nav_benchmark],
+            show_progress="hidden",
+        )
+
+        save_prompts_btn.click(
+            fn=_save_prompts,
+            inputs=[system_guidelines, user_extra],
+            outputs=[system_guidelines, user_extra, prompt_status],
+            show_progress="hidden",
+        ).then(
+            fn=None,
+            inputs=[system_guidelines, user_extra],
+            js=SAVE_PROMPTS_JS,
+            show_progress="hidden",
+        )
+        reset_prompts_btn.click(
+            fn=_reset_prompts,
+            outputs=[system_guidelines, user_extra, prompt_status],
+            show_progress="hidden",
+        ).then(
+            fn=None,
+            inputs=[system_guidelines, user_extra],
+            js=SAVE_PROMPTS_JS,
+            show_progress="hidden",
+        )
+
+        reset_bench_btn.click(
+            fn=_reset_benchmark,
+            outputs=[bench_history, benchmark_view, bench_blob],
+            show_progress="hidden",
+        ).then(
+            fn=None,
+            js=RESET_BENCH_JS,
+            show_progress="hidden",
+        )
+
         btn.click(
             fn=_run,
-            inputs=[text, lang_a, lang_b, model],
+            inputs=[text, lang_a, lang_b, model, system_guidelines, user_extra, bench_history],
             outputs=[
                 placeholder,
                 results,
@@ -987,10 +2085,43 @@ def build_ui() -> gr.Blocks:
                 translation,
                 form_message,
                 run_timing,
+                corrected_view,
+                benchmark_view,
+                bench_history,
+                bench_blob,
             ],
+            show_progress="hidden",
+        ).then(
+            fn=None,
+            inputs=[bench_blob],
+            js=SAVE_BENCH_JS,
             show_progress="hidden",
         )
 
+        demo.load(
+            fn=_restore_session,
+            inputs=[lang_a, lang_b, text],
+            outputs=[lang_a, lang_b, text],
+            js=RESTORE_PREFS_JS,
+            show_progress="hidden",
+        )
+        demo.load(
+            fn=lambda _system_g, user_e: (
+                DEFAULT_SYSTEM_GUIDELINES,
+                sanitize_prompt_addon(user_e),
+            ),
+            inputs=[system_guidelines, user_extra],
+            outputs=[system_guidelines, user_extra],
+            js=RESTORE_PROMPTS_JS,
+            show_progress="hidden",
+        )
+        demo.load(
+            fn=_restore_bench_pack,
+            inputs=[bench_blob, bench_history, benchmark_view],
+            outputs=[bench_blob, bench_history, benchmark_view],
+            js=RESTORE_BENCH_JS,
+            show_progress="hidden",
+        )
         demo.load(
             fn=_refresh_models,
             outputs=[model, model_hint, btn],

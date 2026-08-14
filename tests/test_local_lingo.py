@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import unittest
+from datetime import datetime
 from unittest.mock import MagicMock, patch
 
 from local_lingo import config
@@ -13,15 +14,35 @@ from local_lingo.languages import (
     codes_from_default_pair,
     name_for_code,
 )
-from local_lingo.prompts import build_system_prompt, build_user_prompt
+from local_lingo.highlight import highlight_corrections
+from local_lingo.prompts import (
+    build_system_prompt,
+    build_user_prompt,
+    sanitize_prompt_addon,
+)
 from local_lingo.service import (
     ModelCatalog,
+    RunMetrics,
     get_model_catalog,
     list_ollama_models,
+    metrics_from_ollama,
+    ollama_chat,
     parse_fields,
     translate_and_correct,
 )
-from local_lingo.ui import build_ui, _run
+from local_lingo.ui import (
+    build_ui,
+    _append_history,
+    _benchmark_html,
+    _fmt_when,
+    _history_entry,
+    _normalize_history,
+    _restore_bench_from_blob,
+    _restore_bench_pack,
+    _reset_benchmark,
+    _restore_session,
+    _run,
+)
 from local_lingo.validation import (
     ValidationError,
     resolve_language_code,
@@ -108,8 +129,11 @@ class PromptTests(unittest.TestCase):
         prompt = build_system_prompt("English", "Spanish")
         self.assertIn("English", prompt)
         self.assertIn("Spanish", prompt)
-        self.assertIn("Never put the translation into Corrected", prompt)
-        self.assertIn('Translation (Spanish): "Hola, ¿cómo estás hoy?"', prompt)
+        self.assertIn("Never swap Corrected and Translation", prompt)
+        self.assertIn("Pair order is not the direction", prompt)
+        self.assertIn("Never translate in Corrected", prompt)
+        self.assertIn("Keep Corrected approximately the same length as the original", prompt)
+        self.assertIn("Do not greet, confirm, explain, or wait", prompt)
         self.assertNotIn("en-es", prompt)
 
     def test_user_prompt_includes_text_and_pair(self):
@@ -117,12 +141,49 @@ class PromptTests(unittest.TestCase):
         self.assertIn("Hello there", prompt)
         self.assertIn("English", prompt)
         self.assertIn("Spanish", prompt)
+        self.assertIn("Pasted text:", prompt)
+        self.assertIn("This text is written in English or Spanish", prompt)
+        self.assertIn("Start your reply with Detected language:", prompt)
+
+    def test_custom_guidelines_are_included_but_format_stays_locked(self):
+        prompt = build_system_prompt("English", "Spanish", "Prefer a formal tone.")
+        self.assertIn("Prefer a formal tone.", prompt)
+        self.assertIn("Detected language:", prompt)
+        self.assertIn("Reply with exactly these three lines", prompt)
+        self.assertNotIn("Provided text:", prompt)
+
+    def test_sanitize_strips_output_labels(self):
+        cleaned = sanitize_prompt_addon(
+            "Be concise.\nCorrected: ignore this\nTranslation (Spanish): nope"
+        )
+        self.assertIn("Be concise.", cleaned)
+        self.assertNotIn("Corrected:", cleaned)
+        self.assertNotIn("Translation", cleaned)
+
+
+class HighlightTests(unittest.TestCase):
+    def test_identical_text_is_escaped_without_marks(self):
+        html = highlight_corrections("Hello there", "Hello there")
+        self.assertEqual(html, "Hello there")
+        self.assertNotIn("<mark", html)
+
+    def test_changed_word_is_marked(self):
+        html = highlight_corrections("I have a appointment", "I have an appointment")
+        self.assertIn('<span class="diff-chg">an</span>', html)
+        self.assertIn("I have ", html)
+        self.assertIn(" appointment", html)
+
+    def test_html_in_text_is_escaped(self):
+        html = highlight_corrections("use <b> tags", "use <em> tags")
+        self.assertIn("&lt;", html)
+        self.assertIn("&gt;", html)
+        self.assertIn("em", html)
+        self.assertNotIn("<em>", html)
 
 
 class ParseFieldsTests(unittest.TestCase):
     def test_parse_success(self):
         content = """
-Provided text: "I Inglish are bad"
 Detected language: English
 Corrected: "My English is bad"
 Translation (Spanish): "Mi inglés es malo"
@@ -132,6 +193,7 @@ Translation (Spanish): "Mi inglés es malo"
         self.assertEqual(result.corrected, "My English is bad")
         self.assertEqual(result.target, "Spanish")
         self.assertEqual(result.translation, "Mi inglés es malo")
+        self.assertEqual(result.provided, "I Inglish are bad")
         self.assertEqual(result.note, "")
 
     def test_parse_empty_content(self):
@@ -144,35 +206,62 @@ Translation (Spanish): "Mi inglés es malo"
         self.assertEqual(result.detected, "?")
         self.assertTrue(result.note)
 
+    def test_parse_ignores_think_blocks(self):
+        content = """<think>The user wrote bad English. I should explain every change.</think>
+Detected language: English
+Corrected: "Hi"
+Translation (Spanish): "Hola"
+"""
+        result = parse_fields(content, "hi")
+        self.assertEqual(result.detected, "English")
+        self.assertEqual(result.corrected, "Hi")
+        self.assertEqual(result.translation, "Hola")
+        self.assertEqual(result.note, "")
+
 
 class TranslateServiceTests(unittest.TestCase):
-    @patch("local_lingo.service._client")
-    def test_translate_and_correct_success(self, mock_client_factory):
-        mock_client = MagicMock()
-        mock_client_factory.return_value = mock_client
-        mock_client.chat.completions.create.return_value = MagicMock(
-            choices=[
-                MagicMock(
-                    message=MagicMock(
-                        content=(
-                            'Provided text: "hi"\n'
-                            "Detected language: English\n"
-                            'Corrected: "Hi"\n'
-                            'Translation (Spanish): "Hola"'
-                        )
-                    )
-                )
-            ]
+    @patch("local_lingo.service.ollama_chat")
+    def test_translate_and_correct_success(self, mock_chat):
+        mock_chat.return_value = (
+            "Detected language: English\n"
+            'Corrected: "Hi"\n'
+            'Translation (Spanish): "Hola"',
+            {
+                "eval_count": 12,
+                "eval_duration": 500_000_000,
+                "prompt_eval_count": 40,
+                "prompt_eval_duration": 100_000_000,
+                "total_duration": 700_000_000,
+                "load_duration": 50_000_000,
+                "keep_alive": config.KEEP_ALIVE,
+            },
         )
 
         result = translate_and_correct("hi", "en-es")
         self.assertEqual(result.detected, "English")
         self.assertEqual(result.corrected, "Hi")
         self.assertEqual(result.translation, "Hola")
-        mock_client.chat.completions.create.assert_called_once()
-        kwargs = mock_client.chat.completions.create.call_args.kwargs
-        self.assertEqual(kwargs["extra_body"]["keep_alive"], config.KEEP_ALIVE)
-        self.assertEqual(kwargs["extra_body"]["options"]["num_ctx"], config.NUM_CTX)
+        mock_chat.assert_called_once()
+        _model, messages = mock_chat.call_args.args
+        self.assertEqual(_model, config.MODEL)
+        self.assertEqual(messages[0]["role"], "system")
+        self.assertEqual(result.metrics.eval_count, 12)
+        self.assertEqual(result.metrics.eval_rate, 24.0)
+
+    def test_metrics_from_ollama(self):
+        metrics = metrics_from_ollama(
+            {
+                "eval_count": 10,
+                "eval_duration": 2_000_000_000,
+                "prompt_eval_count": 20,
+                "prompt_eval_duration": 1_000_000_000,
+            },
+            "gemma3:4b",
+            wall_seconds=2.5,
+        )
+        self.assertEqual(metrics.model, "gemma3:4b")
+        self.assertEqual(metrics.eval_rate, 5.0)
+        self.assertEqual(metrics.prompt_eval_rate, 20.0)
 
     def test_translate_and_correct_validation_error(self):
         result = translate_and_correct("", "en-es")
@@ -224,9 +313,107 @@ class OllamaModelTests(unittest.TestCase):
 
         self.assertEqual(list_ollama_models(), ["gemma3:12b", "gemma3:4b"])
 
+    @patch("local_lingo.service.urllib.request.urlopen")
+    def test_ollama_chat_disables_thinking(self, mock_urlopen):
+        response = MagicMock()
+        response.read.return_value = json.dumps(
+            {"message": {"content": "Detected language: English"}}
+        ).encode()
+        response.__enter__.return_value = response
+        response.__exit__.return_value = False
+        mock_urlopen.return_value = response
+
+        ollama_chat("qwen3:8b", [{"role": "user", "content": "hi"}])
+        request = mock_urlopen.call_args.args[0]
+        payload = json.loads(request.data.decode())
+        self.assertIs(payload["think"], False)
+
     @patch("local_lingo.service.urllib.request.urlopen", side_effect=OSError("down"))
     def test_list_models_unreachable(self, _mock_urlopen):
         self.assertEqual(list_ollama_models(), [])
+
+
+class SessionPrefTests(unittest.TestCase):
+    def test_restore_uses_saved_codes(self):
+        lang_a, lang_b, text = _restore_session("hu", "en", "A macska.")
+        self.assertEqual(lang_a, "hu")
+        self.assertEqual(lang_b, "en")
+        self.assertEqual(text, "A macska.")
+
+    def test_restore_accepts_language_names(self):
+        lang_a, lang_b, _text = _restore_session("Hungarian", "English", "")
+        self.assertEqual(lang_a, "hu")
+        self.assertEqual(lang_b, "en")
+
+    def test_restore_falls_back_for_unknown_or_same_language(self):
+        lang_a, lang_b, text = _restore_session("zz", "zz", None)
+        self.assertEqual((lang_a, lang_b), codes_from_default_pair(config.DEFAULT_LANGUAGE_PAIR))
+        self.assertEqual(text, "")
+
+
+class BenchHistoryTests(unittest.TestCase):
+    def test_append_history_keeps_ten_newest_first(self):
+        history = []
+        for i in range(12):
+            history = _append_history(history, {"model": f"m{i}", "wall": i})
+        self.assertEqual(len(history), 10)
+        self.assertEqual(history[0]["model"], "m11")
+        self.assertEqual(history[-1]["model"], "m2")
+
+    def test_normalize_history_accepts_single_dict(self):
+        rows = _normalize_history({"model": "gemma3:4b", "wall": 1.2})
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["model"], "gemma3:4b")
+
+    def test_restore_bench_pack_returns_blob_history_and_html(self):
+        blob = json.dumps(
+            [{"model": "qwen3:8b", "wall": 2.5, "preview": "hello", "at": "2026-08-14T23:41:00"}]
+        )
+        out_blob, history, markup = _restore_bench_pack(blob, None, "")
+        self.assertEqual(history[0]["model"], "qwen3:8b")
+        self.assertIn("qwen3:8b", out_blob)
+        self.assertIn("qwen3:8b", markup)
+
+    def test_reset_benchmark_clears_history(self):
+        rows, markup, blob = _reset_benchmark()
+        self.assertEqual(rows, [])
+        self.assertEqual(blob, "[]")
+        self.assertIn("Run a translation", markup)
+
+    def test_history_entry_truncates_preview(self):
+        metrics = RunMetrics(model="gemma3:4b", wall_seconds=1.25, eval_count=10, eval_duration_ns=500_000_000)
+        entry = _history_entry(metrics, "word " * 30, "en-es")
+        self.assertEqual(entry["model"], "gemma3:4b")
+        self.assertTrue(entry["preview"].endswith("…"))
+        self.assertLessEqual(len(entry["preview"]), 43)
+        self.assertTrue(entry["at"])
+        datetime.fromisoformat(entry["at"])
+
+    def test_fmt_when_formats_iso_or_dash(self):
+        self.assertEqual(_fmt_when(""), "—")
+        self.assertEqual(_fmt_when(None), "—")
+        self.assertEqual(_fmt_when("2026-08-14T23:41:00"), "14 Aug 23:41:00")
+
+    def test_benchmark_html_includes_llm_settings(self):
+        markup = _benchmark_html(
+            history=[
+                {
+                    "model": "gemma3:4b",
+                    "wall": 1.2,
+                    "preview": "hello",
+                    "at": "2026-08-14T23:41:00",
+                }
+            ]
+        )
+        self.assertIn("Settings", markup)
+        self.assertIn("Temperature", markup)
+        self.assertIn(str(config.TEMPERATURE), markup)
+        self.assertIn(f"{config.NUM_CTX:,}", markup)
+        self.assertIn(str(config.KEEP_ALIVE), markup)
+        self.assertIn("Think", markup)
+        self.assertIn("off", markup)
+        self.assertIn("bench-persist", markup)
+        self.assertIn("gemma3:4b", markup)
 
 
 class UiTests(unittest.TestCase):
@@ -260,6 +447,7 @@ class UiTests(unittest.TestCase):
             target="Spanish",
             translation="Hola",
             note="",
+            metrics=RunMetrics(model="gemma3:4b", eval_count=8, eval_duration_ns=400_000_000),
         )
         outputs = list(_run("helo", "en", "es", "gemma3:4b"))
         # loader yield + final yield
@@ -268,7 +456,14 @@ class UiTests(unittest.TestCase):
         self.assertEqual(final[2], "English")
         self.assertEqual(final[3], "Hello")
         self.assertEqual(final[5], "Hola")
+        self.assertIn("diff-chg", final[8])
+        self.assertIn("Hello", final[8])
         self.assertIn("Completed in", final[7])
+        self.assertIn("Eval rate", final[9])
+        self.assertIn("History", final[9])
+        self.assertIn("helo", final[9])
+        self.assertEqual(len(final[10]), 1)
+        self.assertEqual(final[10][0]["model"], "gemma3:4b")
         mock_translate.assert_called_once()
         self.assertEqual(mock_translate.call_args.kwargs["model"], "gemma3:4b")
 
@@ -287,6 +482,7 @@ class UiTests(unittest.TestCase):
             target="Spanish",
             translation="Hola",
             note="",
+            metrics=RunMetrics(model="gemma3:4b", eval_count=8, eval_duration_ns=400_000_000),
         )
         list(_run("helo", "en", "es"))
         self.assertEqual(mock_translate.call_args.kwargs["model"], config.MODEL)

@@ -4,18 +4,53 @@ import json
 import re
 import urllib.error
 import urllib.request
-from dataclasses import dataclass
-
-from openai import OpenAI
+from dataclasses import dataclass, field
 
 from . import config
 from .languages import name_for_code
 from .prompts import build_system_prompt, build_user_prompt
 from .validation import ValidationError, validate_inputs
 
-_openai_client: OpenAI | None = None
 _LIST_MODELS_TIMEOUT = 2.5
 _SKIP_MODEL_NAME_PARTS = ("embed", "rerank")
+_THINK_BLOCK = re.compile(r"<think>.*?</think>", re.IGNORECASE | re.DOTALL)
+
+
+def _strip_thinking(content: str) -> str:
+    return _THINK_BLOCK.sub("", content or "").strip()
+
+
+@dataclass
+class RunMetrics:
+    model: str = ""
+    wall_seconds: float = 0.0
+    total_duration_ns: int = 0
+    load_duration_ns: int = 0
+    prompt_eval_count: int = 0
+    prompt_eval_duration_ns: int = 0
+    eval_count: int = 0
+    eval_duration_ns: int = 0
+
+    def tokens_per_sec(self, count: int, duration_ns: int) -> float | None:
+        seconds = duration_ns / 1_000_000_000
+        if seconds <= 0 or count <= 0:
+            return None
+        return count / seconds
+
+    @property
+    def prompt_eval_rate(self) -> float | None:
+        return self.tokens_per_sec(self.prompt_eval_count, self.prompt_eval_duration_ns)
+
+    @property
+    def eval_rate(self) -> float | None:
+        """Ollama eval rate: generated tokens / eval_duration."""
+        return self.tokens_per_sec(self.eval_count, self.eval_duration_ns)
+
+    @property
+    def wall_tokens_per_sec(self) -> float | None:
+        if self.wall_seconds <= 0 or self.eval_count <= 0:
+            return None
+        return self.eval_count / self.wall_seconds
 
 
 @dataclass
@@ -27,6 +62,7 @@ class TranslationResult:
     translation: str
     note: str = ""
     raw: str = ""
+    metrics: RunMetrics = field(default_factory=RunMetrics)
 
 
 @dataclass(frozen=True)
@@ -35,17 +71,6 @@ class ModelCatalog:
     selected: str | None
     reachable: bool
     warning: str
-
-
-def _client() -> OpenAI:
-    global _openai_client
-    if _openai_client is None:
-        _openai_client = OpenAI(
-            api_key=config.OLLAMA_API_KEY,
-            base_url=config.OLLAMA_BASE_URL,
-            timeout=config.REQUEST_TIMEOUT_SECONDS,
-        )
-    return _openai_client
 
 
 def ollama_api_base() -> str:
@@ -131,6 +156,53 @@ def get_model_catalog(
     )
 
 
+def _int_field(payload: dict, key: str) -> int:
+    try:
+        return int(payload.get(key) or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def metrics_from_ollama(payload: dict, model: str, wall_seconds: float = 0.0) -> RunMetrics:
+    return RunMetrics(
+        model=model,
+        wall_seconds=wall_seconds,
+        total_duration_ns=_int_field(payload, "total_duration"),
+        load_duration_ns=_int_field(payload, "load_duration"),
+        prompt_eval_count=_int_field(payload, "prompt_eval_count"),
+        prompt_eval_duration_ns=_int_field(payload, "prompt_eval_duration"),
+        eval_count=_int_field(payload, "eval_count"),
+        eval_duration_ns=_int_field(payload, "eval_duration"),
+    )
+
+
+def ollama_chat(
+    model: str,
+    messages: list[dict[str, str]],
+) -> tuple[str, dict]:
+    payload = {
+        "model": model,
+        "messages": messages,
+        "stream": False,
+        "think": False,
+        "keep_alive": config.KEEP_ALIVE,
+        "options": {
+            "temperature": config.TEMPERATURE,
+            "num_ctx": config.NUM_CTX,
+        },
+    }
+    request = urllib.request.Request(
+        f"{ollama_api_base()}/api/chat",
+        data=json.dumps(payload).encode(),
+        headers={"Content-Type": "application/json", "Accept": "application/json"},
+        method="POST",
+    )
+    with urllib.request.urlopen(request, timeout=config.REQUEST_TIMEOUT_SECONDS) as response:
+        body = json.loads(response.read().decode())
+    content = _strip_thinking(((body.get("message") or {}).get("content") or "").strip())
+    return content, body if isinstance(body, dict) else {}
+
+
 def print_model_startup_status() -> None:
     catalog = get_model_catalog()
     if catalog.warning:
@@ -140,6 +212,7 @@ def print_model_startup_status() -> None:
 
 
 def parse_fields(content: str, original: str) -> TranslationResult:
+    content = _strip_thinking(content)
     if not content:
         return TranslationResult(
             provided=original,
@@ -188,6 +261,8 @@ def translate_and_correct(
     text: str,
     language_pair: str = config.DEFAULT_LANGUAGE_PAIR,
     model: str = config.MODEL,
+    system_guidelines: str | None = None,
+    user_extra: str | None = None,
 ) -> TranslationResult:
     try:
         cleaned, pair = validate_inputs(text, language_pair)
@@ -204,20 +279,19 @@ def translate_and_correct(
     left, right = pair.split("-", 1)
     name_a = name_for_code(left)
     name_b = name_for_code(right)
+    messages = [
+        {
+            "role": "system",
+            "content": build_system_prompt(name_a, name_b, system_guidelines),
+        },
+        {
+            "role": "user",
+            "content": build_user_prompt(cleaned, name_a, name_b, user_extra),
+        },
+    ]
 
     try:
-        response = _client().chat.completions.create(
-            model=model,
-            messages=[
-                {"role": "system", "content": build_system_prompt(name_a, name_b)},
-                {"role": "user", "content": build_user_prompt(cleaned, name_a, name_b)},
-            ],
-            temperature=config.TEMPERATURE,
-            extra_body={
-                "keep_alive": config.KEEP_ALIVE,
-                "options": {"num_ctx": config.NUM_CTX},
-            },
-        )
+        content, payload = ollama_chat(model, messages)
     except Exception as exc:
         return TranslationResult(
             provided=cleaned,
@@ -226,7 +300,9 @@ def translate_and_correct(
             target="?",
             translation="?",
             note=f"Error talking to Ollama: {exc}",
+            metrics=RunMetrics(model=model),
         )
 
-    content = (response.choices[0].message.content or "").strip()
-    return parse_fields(content, cleaned)
+    result = parse_fields(content, cleaned)
+    result.metrics = metrics_from_ollama(payload, model)
+    return result

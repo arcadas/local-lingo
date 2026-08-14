@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from openai import OpenAI
 
 from . import config
+from .languages import name_for_code
 from .prompts import build_system_prompt, build_user_prompt
 from .validation import ValidationError, validate_inputs
 
@@ -200,12 +201,16 @@ def translate_and_correct(
             note=str(exc),
         )
 
+    left, right = pair.split("-", 1)
+    name_a = name_for_code(left)
+    name_b = name_for_code(right)
+
     try:
         response = _client().chat.completions.create(
             model=model,
             messages=[
-                {"role": "system", "content": build_system_prompt(pair)},
-                {"role": "user", "content": build_user_prompt(cleaned, pair)},
+                {"role": "system", "content": build_system_prompt(name_a, name_b)},
+                {"role": "user", "content": build_user_prompt(cleaned, name_a, name_b)},
             ],
             temperature=config.TEMPERATURE,
             extra_body={

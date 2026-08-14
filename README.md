@@ -6,9 +6,17 @@
 
 A private, local proofreader and translator web app (**LocalLingo**). It rewrites text so it sounds natural in the detected language, then translates it to the other language in your pair — using [Ollama](https://ollama.com) on your machine.
 
+<p align="center">
+  <em>Rewrite text to sound natural, then translate it locally using Ollama.</em>
+</p>
+
+<p align="center">
+  <img src="./docs/screenshot.png" alt="LocalLingo web app: language pair, model picker, source text, and translation results" width="900">
+</p>
+
 ## Features
 
-- Bidirectional language pairs (e.g. `en-hu`, `de-fr`)
+- Bidirectional language pairs (e.g. `en-es`, `de-fr`)
 - Native-style rewrite, then translation
 - Local Gradio UI (no data sent to cloud APIs)
 - Copy buttons on corrected text and translation results
@@ -140,7 +148,7 @@ uv run local-lingo-cli
 - Pick from the searchable dropdowns (full language names)
 - The pair is **bidirectional**: the model detects which side the text is in, corrects it, then translates to the other
 - Both languages must be different
-- Defaults come from `DEFAULT_LANGUAGE_PAIR` in `src/local_lingo/config.py` (e.g. `en-hu` → English / Hungarian)
+- Defaults come from `DEFAULT_LANGUAGE_PAIR` in `src/local_lingo/config.py` (e.g. `en-es` → English / Spanish)
 
 ### Model selection
 
@@ -155,7 +163,7 @@ Edit `src/local_lingo/config.py`:
 | Setting | Default | Meaning |
 |---------|---------|---------|
 | `MODEL` | `"gemma3:4b"` | Default Ollama model in the UI dropdown, if installed |
-| `DEFAULT_LANGUAGE_PAIR` | `"en-hu"` | Default pair shown in the UI |
+| `DEFAULT_LANGUAGE_PAIR` | `"en-es"` | Default pair shown in the UI |
 | `OLLAMA_BASE_URL` | `"http://localhost:11434/v1"` | Ollama OpenAI-compatible API |
 | `OLLAMA_API_KEY` | `"ollama"` | Dummy key (required by the OpenAI client; Ollama ignores it) |
 | `REQUEST_TIMEOUT_SECONDS` | `180.0` | Max wait for a model response |
@@ -179,6 +187,7 @@ Prompts live in `src/local_lingo/prompts.py`. Parsing and Ollama calls live in `
 ```text
 .
   README.md
+  docs/screenshot.png
   pyproject.toml
   app.py                     # Gradio watch-friendly entry
   src/local_lingo/           # Installable package (`import local_lingo`)

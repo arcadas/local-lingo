@@ -2,7 +2,7 @@ from pathlib import Path
 
 APP_NAME = "LocalLingo"
 MODEL = "gemma3:4b"
-DEFAULT_LANGUAGE_PAIR = "en-hu"
+DEFAULT_LANGUAGE_PAIR = "en-es"
 OLLAMA_BASE_URL = "http://localhost:11434/v1"
 OLLAMA_API_KEY = "ollama"
 REQUEST_TIMEOUT_SECONDS = 180.0

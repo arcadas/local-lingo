@@ -120,13 +120,30 @@ button, input, textarea, select, label, .prose, .block, .form {
   min-height: 0 !important;
 }
 
-#left-card {
-  gap: 0.45rem !important;
+#left-card,
+#right-card,
+#results-stack {
+  gap: 0.5rem !important;
 }
 
 #right-card {
   justify-content: center !important;
-  gap: 0.45rem !important;
+}
+
+#left-card .block,
+#right-card .block,
+#left-card .form,
+#right-card .form,
+.copyable-field {
+  padding: 0 !important;
+  margin: 0 !important;
+  gap: 0 !important;
+}
+
+.block .label-wrap,
+[class*="block-label"] {
+  margin: 0 0 0.25rem 0 !important;
+  padding: 0 !important;
 }
 
 #right-card .html-container,
@@ -142,12 +159,14 @@ button, input, textarea, select, label, .prose, .block, .form {
 
 label span,
 .block .label-wrap span,
-[class*="block-label"] {
+[class*="block-label"],
+.lang-section-label {
   background: transparent !important;
   border: none !important;
   box-shadow: none !important;
-  color: #4b5563 !important;
+  color: #111827 !important;
   font-weight: 600 !important;
+  font-size: 0.95rem !important;
   padding-left: 0 !important;
   padding-right: 0 !important;
 }
@@ -183,6 +202,7 @@ input::placeholder, textarea::placeholder {
 
 button.primary {
   min-height: 46px !important;
+  margin-top: 0.55rem !important;
   border-radius: 10px !important;
   font-weight: 650 !important;
   background: #2563eb !important;
@@ -294,7 +314,7 @@ button.primary:hover {
   grid-template-columns: 1fr auto 1fr !important;
   gap: 0.75rem !important;
   align-items: center !important;
-  margin: 0 0 0.55rem 0 !important;
+  margin: 0 !important;
 }
 
 .model-row {
@@ -302,13 +322,13 @@ button.primary:hover {
   grid-template-columns: 1fr !important;
   gap: 0.75rem !important;
   align-items: center !important;
-  margin: 0 0 0.55rem 0 !important;
+  margin: 0 !important;
 }
 
 .lang-section-label {
-  margin: 0 0 0.15rem 0 !important;
+  margin: 0 0 0.25rem 0 !important;
   padding: 0 !important;
-  color: #4b5563 !important;
+  color: #111827 !important;
   font-size: 0.95rem !important;
   font-weight: 600 !important;
 }
@@ -894,7 +914,7 @@ def build_ui() -> gr.Blocks:
 
             with gr.Column(scale=1, min_width=320, elem_id="right-card", elem_classes=["card"]):
                 placeholder = gr.HTML(value=PLACEHOLDER_HTML, visible=True)
-                with gr.Column(visible=False) as results:
+                with gr.Column(visible=False, elem_id="results-stack") as results:
                     detected = gr.Textbox(
                         label="Detected language",
                         interactive=False,

@@ -13,6 +13,7 @@ from local_lingo.languages import (
     codes_from_default_pair,
     name_for_code,
 )
+from local_lingo.prompts import build_system_prompt, build_user_prompt
 from local_lingo.service import (
     ModelCatalog,
     get_model_catalog,
@@ -36,6 +37,7 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(config.APP_NAME, "LocalLingo")
 
     def test_default_pair_format(self):
+        self.assertEqual(config.DEFAULT_LANGUAGE_PAIR, "en-es")
         left, right = codes_from_default_pair(config.DEFAULT_LANGUAGE_PAIR)
         self.assertTrue(left)
         self.assertTrue(right)
@@ -52,10 +54,10 @@ class LanguageCatalogTests(unittest.TestCase):
 
     def test_name_for_code(self):
         self.assertEqual(name_for_code("en"), "English")
-        self.assertEqual(name_for_code("hu"), "Hungarian")
+        self.assertEqual(name_for_code("es"), "Spanish")
 
     def test_codes_from_default_pair(self):
-        self.assertEqual(codes_from_default_pair("en-hu"), ("en", "hu"))
+        self.assertEqual(codes_from_default_pair("en-es"), ("en", "es"))
         self.assertEqual(codes_from_default_pair("DE_FR"), ("de", "fr"))
 
 
@@ -70,35 +72,51 @@ class ValidationTests(unittest.TestCase):
     def test_resolve_language_code_from_code_and_name(self):
         self.assertEqual(resolve_language_code("en"), "en")
         self.assertEqual(resolve_language_code("English"), "en")
-        self.assertEqual(resolve_language_code("HUNGARIAN"), "hu")
+        self.assertEqual(resolve_language_code("SPANISH"), "es")
 
     def test_resolve_language_unknown(self):
         with self.assertRaises(ValidationError):
             resolve_language_code("NotALanguage")
 
     def test_validate_language_selection(self):
-        self.assertEqual(validate_language_selection("en", "hu"), "en-hu")
-        self.assertEqual(validate_language_selection("English", "Hungarian"), "en-hu")
+        self.assertEqual(validate_language_selection("en", "es"), "en-es")
+        self.assertEqual(validate_language_selection("English", "Spanish"), "en-es")
 
     def test_validate_language_selection_same_language(self):
         with self.assertRaises(ValidationError):
             validate_language_selection("en", "en")
 
     def test_validate_language_pair(self):
-        self.assertEqual(validate_language_pair("EN_HU"), "en-hu")
+        self.assertEqual(validate_language_pair("EN_ES"), "en-es")
         with self.assertRaises(ValidationError):
             validate_language_pair("en")
         with self.assertRaises(ValidationError):
             validate_language_pair("en-en")
 
     def test_validate_inputs_from_languages(self):
-        text, pair = validate_inputs_from_languages("Hi there", "en", "hu")
+        text, pair = validate_inputs_from_languages("Hi there", "en", "es")
         self.assertEqual(text, "Hi there")
-        self.assertEqual(pair, "en-hu")
+        self.assertEqual(pair, "en-es")
 
     def test_validate_inputs_from_languages_rejects_empty_text(self):
         with self.assertRaises(ValidationError):
-            validate_inputs_from_languages("", "en", "hu")
+            validate_inputs_from_languages("", "en", "es")
+
+
+class PromptTests(unittest.TestCase):
+    def test_system_prompt_uses_full_names_and_forbids_swapping_fields(self):
+        prompt = build_system_prompt("English", "Spanish")
+        self.assertIn("English", prompt)
+        self.assertIn("Spanish", prompt)
+        self.assertIn("Never put the translation into Corrected", prompt)
+        self.assertIn('Translation (Spanish): "Hola, ¿cómo estás hoy?"', prompt)
+        self.assertNotIn("en-es", prompt)
+
+    def test_user_prompt_includes_text_and_pair(self):
+        prompt = build_user_prompt("Hello there", "English", "Spanish")
+        self.assertIn("Hello there", prompt)
+        self.assertIn("English", prompt)
+        self.assertIn("Spanish", prompt)
 
 
 class ParseFieldsTests(unittest.TestCase):
@@ -107,13 +125,13 @@ class ParseFieldsTests(unittest.TestCase):
 Provided text: "I Inglish are bad"
 Detected language: English
 Corrected: "My English is bad"
-Translation (Hungarian): "Rossz az angolom"
+Translation (Spanish): "Mi inglés es malo"
 """
         result = parse_fields(content, "I Inglish are bad")
         self.assertEqual(result.detected, "English")
         self.assertEqual(result.corrected, "My English is bad")
-        self.assertEqual(result.target, "Hungarian")
-        self.assertEqual(result.translation, "Rossz az angolom")
+        self.assertEqual(result.target, "Spanish")
+        self.assertEqual(result.translation, "Mi inglés es malo")
         self.assertEqual(result.note, "")
 
     def test_parse_empty_content(self):
@@ -140,24 +158,24 @@ class TranslateServiceTests(unittest.TestCase):
                             'Provided text: "hi"\n'
                             "Detected language: English\n"
                             'Corrected: "Hi"\n'
-                            'Translation (Hungarian): "Szia"'
+                            'Translation (Spanish): "Hola"'
                         )
                     )
                 )
             ]
         )
 
-        result = translate_and_correct("hi", "en-hu")
+        result = translate_and_correct("hi", "en-es")
         self.assertEqual(result.detected, "English")
         self.assertEqual(result.corrected, "Hi")
-        self.assertEqual(result.translation, "Szia")
+        self.assertEqual(result.translation, "Hola")
         mock_client.chat.completions.create.assert_called_once()
         kwargs = mock_client.chat.completions.create.call_args.kwargs
         self.assertEqual(kwargs["extra_body"]["keep_alive"], config.KEEP_ALIVE)
         self.assertEqual(kwargs["extra_body"]["options"]["num_ctx"], config.NUM_CTX)
 
     def test_translate_and_correct_validation_error(self):
-        result = translate_and_correct("", "en-hu")
+        result = translate_and_correct("", "en-es")
         self.assertIn("text", result.note.lower())
         self.assertEqual(result.corrected, "")
 
@@ -218,7 +236,7 @@ class UiTests(unittest.TestCase):
         self.assertEqual(demo.title, config.APP_NAME)
 
     def test_run_validation_error_yields_message(self):
-        outputs = list(_run("", "en", "hu"))
+        outputs = list(_run("", "en", "es"))
         self.assertEqual(len(outputs), 1)
         self.assertIn("msg-error", outputs[0][6])
 
@@ -239,17 +257,17 @@ class UiTests(unittest.TestCase):
         mock_translate.return_value = MagicMock(
             detected="English",
             corrected="Hello",
-            target="Hungarian",
-            translation="Szia",
+            target="Spanish",
+            translation="Hola",
             note="",
         )
-        outputs = list(_run("helo", "en", "hu", "gemma3:4b"))
+        outputs = list(_run("helo", "en", "es", "gemma3:4b"))
         # loader yield + final yield
         self.assertEqual(len(outputs), 2)
         final = outputs[-1]
         self.assertEqual(final[2], "English")
         self.assertEqual(final[3], "Hello")
-        self.assertEqual(final[5], "Szia")
+        self.assertEqual(final[5], "Hola")
         self.assertIn("Completed in", final[7])
         mock_translate.assert_called_once()
         self.assertEqual(mock_translate.call_args.kwargs["model"], "gemma3:4b")
@@ -266,11 +284,11 @@ class UiTests(unittest.TestCase):
         mock_translate.return_value = MagicMock(
             detected="English",
             corrected="Hello",
-            target="Hungarian",
-            translation="Szia",
+            target="Spanish",
+            translation="Hola",
             note="",
         )
-        list(_run("helo", "en", "hu"))
+        list(_run("helo", "en", "es"))
         self.assertEqual(mock_translate.call_args.kwargs["model"], config.MODEL)
 
     @patch("local_lingo.ui.get_model_catalog")
@@ -281,7 +299,7 @@ class UiTests(unittest.TestCase):
             reachable=True,
             warning="No Ollama models installed. Pull the default with: ollama pull gemma3:4b",
         )
-        outputs = list(_run("hello", "en", "hu"))
+        outputs = list(_run("hello", "en", "es"))
         self.assertEqual(len(outputs), 1)
         self.assertIn("No Ollama models", outputs[0][6])
         self.assertIn("msg-warn", outputs[0][6])

@@ -56,5 +56,5 @@ def name_for_code(code: str) -> str:
 
 
 def codes_from_default_pair(pair: str) -> tuple[str, str]:
-    left, right = (pair or "en-hu").lower().replace("_", "-").split("-", 1)
+    left, right = (pair or "en-es").lower().replace("_", "-").split("-", 1)
     return left, right

@@ -42,7 +42,7 @@ def validate_language_pair(language_pair: str) -> str:
         raise ValidationError("Please select both languages.")
     if not LANGUAGE_PAIR_PATTERN.fullmatch(pair):
         raise ValidationError(
-            "Invalid language pair. Choose two different languages, e.g. English and Hungarian."
+            "Invalid language pair. Choose two different languages, e.g. English and Spanish."
         )
     left, right = pair.split("-")
     if left == right:

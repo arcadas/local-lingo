@@ -34,9 +34,14 @@ from local_lingo.ui import (
     build_ui,
     _append_history,
     _benchmark_html,
+    _entry_rating_value,
+    _model_size_b,
+    _pick_model_badges,
     _fmt_when,
     _history_entry,
     _normalize_history,
+    _read_stars_html,
+    _star_fill_levels,
     _restore_bench_from_blob,
     _restore_bench_pack,
     _reset_benchmark,
@@ -379,15 +384,46 @@ class BenchHistoryTests(unittest.TestCase):
         self.assertEqual(rows, [])
         self.assertEqual(blob, "[]")
         self.assertIn("Run a translation", markup)
+        self.assertIn("model-stats-root", markup)
 
     def test_history_entry_truncates_preview(self):
         metrics = RunMetrics(model="gemma3:4b", wall_seconds=1.25, eval_count=10, eval_duration_ns=500_000_000)
         entry = _history_entry(metrics, "word " * 30, "en-es")
         self.assertEqual(entry["model"], "gemma3:4b")
+        self.assertTrue(entry["run_id"])
         self.assertTrue(entry["preview"].endswith("…"))
         self.assertLessEqual(len(entry["preview"]), 43)
         self.assertTrue(entry["at"])
         datetime.fromisoformat(entry["at"])
+
+    def test_star_fill_levels_round_to_half(self):
+        self.assertEqual(_star_fill_levels(None), [0.0, 0.0, 0.0, 0.0, 0.0])
+        self.assertEqual(_star_fill_levels(3.2), [1.0, 1.0, 1.0, 0.0, 0.0])
+        self.assertEqual(_star_fill_levels(3.4), [1.0, 1.0, 1.0, 0.5, 0.0])
+        self.assertEqual(_star_fill_levels(5), [1.0, 1.0, 1.0, 1.0, 1.0])
+
+    def test_entry_rating_value_reads_each_field(self):
+        self.assertIsNone(_entry_rating_value({}, "corrected"))
+        self.assertEqual(_entry_rating_value({"rating_corrected": 4, "rating_translation": 5}, "corrected"), 4.0)
+        self.assertEqual(_entry_rating_value({"rating_corrected": 4, "rating_translation": 5}, "translation"), 5.0)
+        self.assertIn("star-read", _read_stars_html(3.5))
+        self.assertEqual(_read_stars_html(None), "—")
+
+    def test_model_badges_pick_leaders(self):
+        self.assertEqual(_model_size_b("gemma3:4b"), 4.0)
+        self.assertEqual(_model_size_b("qwen3:8b"), 8.0)
+        self.assertIsNone(_model_size_b("translategemma:latest"))
+        badges = _pick_model_badges(
+            {
+                "gemma3:4b": {"n": 3, "wall": 9.0, "load_s": 1.2, "rewrite_avg": 4.5, "translation_avg": 3.0},
+                "qwen3:8b": {"n": 2, "wall": 4.0, "load_s": 2.0, "rewrite_avg": 3.0, "translation_avg": 5.0},
+            }
+        )
+        labels = {name: [item[1] for item in items] for name, items in badges.items()}
+        self.assertIn("Best rewrite", labels["gemma3:4b"])
+        self.assertIn("Lowest memory", labels["gemma3:4b"])
+        self.assertIn("Best translation", labels["qwen3:8b"])
+        self.assertIn("Fastest", labels["qwen3:8b"])
 
     def test_fmt_when_formats_iso_or_dash(self):
         self.assertEqual(_fmt_when(""), "—")
@@ -414,6 +450,9 @@ class BenchHistoryTests(unittest.TestCase):
         self.assertIn("off", markup)
         self.assertIn("bench-persist", markup)
         self.assertIn("gemma3:4b", markup)
+        self.assertIn("Rewrite", markup)
+        self.assertIn("Translation", markup)
+        self.assertIn("model-stats-root", markup)
 
 
 class UiTests(unittest.TestCase):
@@ -458,12 +497,16 @@ class UiTests(unittest.TestCase):
         self.assertEqual(final[5], "Hola")
         self.assertIn("diff-chg", final[8])
         self.assertIn("Hello", final[8])
+        self.assertIn("star-rate", final[8])
         self.assertIn("Completed in", final[7])
-        self.assertIn("Eval rate", final[9])
-        self.assertIn("History", final[9])
-        self.assertIn("helo", final[9])
-        self.assertEqual(len(final[10]), 1)
-        self.assertEqual(final[10][0]["model"], "gemma3:4b")
+        self.assertIn("star-rate", final[9])
+        self.assertIn("Translation", final[9])
+        self.assertIn("Eval rate", final[10])
+        self.assertIn("History", final[10])
+        self.assertIn("helo", final[10])
+        self.assertEqual(len(final[11]), 1)
+        self.assertEqual(final[11][0]["model"], "gemma3:4b")
+        self.assertTrue(final[11][0]["run_id"])
         mock_translate.assert_called_once()
         self.assertEqual(mock_translate.call_args.kwargs["model"], "gemma3:4b")
 

@@ -1,6 +1,7 @@
 import base64
 import html
 import json
+import re
 import time
 from datetime import datetime
 
@@ -21,11 +22,20 @@ from .validation import ValidationError, validate_inputs_from_languages
 
 
 LIGHT_CSS = """
+:root, html, body, .gradio-container, .dark, .dark .gradio-container {
+  --font: Inter, ui-sans-serif, system-ui, sans-serif !important;
+  --block-label-text-color: #111827 !important;
+  --block-label-text-size: 0.95rem !important;
+  --block-label-text-weight: 600 !important;
+  --body-text-size: 0.875rem !important;
+  --input-text-size: 0.875rem !important;
+}
+
 html, body, .gradio-container, .dark, .dark .gradio-container {
   background: #ffffff !important;
   color: #111827 !important;
   color-scheme: light !important;
-  font-family: Inter, ui-sans-serif, system-ui, sans-serif !important;
+  font-family: var(--font) !important;
   -webkit-font-smoothing: antialiased;
   --body-background-fill: #ffffff !important;
   --background-fill-primary: #ffffff !important;
@@ -35,11 +45,11 @@ html, body, .gradio-container, .dark, .dark .gradio-container {
   --block-label-border-width: 0px !important;
   --block-title-background-fill: transparent !important;
   --block-title-border-width: 0px !important;
-  --block-label-text-color: #4b5563 !important;
 }
 
-button, input, textarea, select, label, .prose, .block, .form {
-  font-family: Inter, ui-sans-serif, system-ui, sans-serif !important;
+button, input, textarea, select, label, .prose, .prose p, .prose div,
+.block, .form, .field-label, .lang-section-label, .result-field-label {
+  font-family: var(--font) !important;
   -webkit-font-smoothing: antialiased;
 }
 
@@ -371,12 +381,38 @@ button, input, textarea, select, label, .prose, .block, .form {
 
 .bench-grid {
   display: grid !important;
-  grid-template-columns: 1.2fr 14% minmax(0, 1.2fr) 0.65fr 0.85fr 0.95fr 0.8fr 0.6fr !important;
+  grid-template-columns: 1fr 11% minmax(0, 1fr) 0.5fr 0.7fr 0.75fr 0.65fr 0.45fr 1.5rem 0.95fr 0.95fr !important;
   width: 100% !important;
   border: none !important;
   outline: none !important;
   box-shadow: none !important;
   font-size: 0.8rem !important;
+  font-family: var(--font) !important;
+}
+
+.bench-models {
+  border: 1px solid #e5e7eb !important;
+  border-radius: 10px !important;
+  overflow: hidden !important;
+  background: #ffffff !important;
+  margin-top: 0.75rem !important;
+}
+
+.bench-models .bench-history-head {
+  background: #f3e8ff !important;
+  color: #7e22ce !important;
+}
+
+.bench-models .bench-history-hint {
+  color: #a855f7 !important;
+}
+
+.bench-models-grid {
+  display: grid !important;
+  grid-template-columns: minmax(0, 1.4fr) 6.1rem 0.45fr 0.55fr 0.7fr 0.8fr 0.7fr 0.5fr 1.5rem 0.95fr 0.95fr !important;
+  width: 100% !important;
+  font-size: 0.8rem !important;
+  font-family: var(--font) !important;
 }
 
 .bench-h,
@@ -424,6 +460,55 @@ button, input, textarea, select, label, .prose, .block, .form {
   font-weight: 400 !important;
 }
 
+.bench-h.bench-gap,
+.bench-c.bench-gap {
+  padding: 0 !important;
+  min-width: 0 !important;
+}
+
+.bench-h.rating-col,
+.bench-c.stars-cell {
+  font-weight: 400 !important;
+  text-align: left !important;
+  padding-left: 0.45rem !important;
+}
+
+.model-name-cell {
+  display: flex !important;
+  align-items: center !important;
+  gap: 0.4rem !important;
+  overflow: hidden !important;
+}
+
+.model-name-text {
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  min-width: 0 !important;
+}
+
+.model-badges {
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 0.12rem !important;
+  flex-shrink: 0 !important;
+}
+
+.model-badge {
+  font-size: 0.95rem !important;
+  line-height: 1 !important;
+  cursor: default !important;
+}
+
+.bench-c.model-cell,
+.bench-h.badges-col,
+.bench-c.badges-col {
+  overflow: visible !important;
+}
+
+.bench-c.badges-col {
+  font-weight: 400 !important;
+}
+
 @media (max-width: 800px) {
   .bench-stats {
     grid-template-columns: 1fr !important;
@@ -434,7 +519,12 @@ button, input, textarea, select, label, .prose, .block, .form {
   }
 
   .bench-grid {
-    grid-template-columns: 0.9fr 1fr 1.1fr 0.65fr 0.8fr 0.85fr 0.8fr 0.6fr !important;
+    grid-template-columns: 0.85fr 0.95fr 1fr 0.55fr 0.7fr 0.75fr 0.7fr 0.45fr 1.5rem 0.9fr 0.9fr !important;
+    overflow-x: auto !important;
+  }
+
+  .bench-models-grid {
+    grid-template-columns: 1.2fr 6.1rem 0.45fr 0.55fr 0.7fr 0.75fr 0.65fr 0.45fr 1.5rem 0.9fr 0.9fr !important;
     overflow-x: auto !important;
   }
 }
@@ -473,7 +563,11 @@ button, input, textarea, select, label, .prose, .block, .form {
 /* Tighten space under Languages heading (Gradio wraps HTML in a block). */
 #left-card > div:first-child,
 #left-card .html-container,
-#left-card .prose {
+#left-card .prose,
+#right-card .html-container,
+#right-card .prose,
+#results-stack .html-container,
+#results-stack .prose {
   margin: 0 !important;
   padding: 0 !important;
   min-height: 0 !important;
@@ -482,7 +576,25 @@ button, input, textarea, select, label, .prose, .block, .form {
 #left-card,
 #right-card,
 #results-stack {
-  gap: 0.5rem !important;
+  gap: 0.85rem !important;
+}
+
+.field-group {
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 0.25rem !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  min-height: 0 !important;
+}
+
+.field-group > .block,
+.field-group > div,
+.field-group .html-container,
+.field-group .prose {
+  margin: 0 !important;
+  padding: 0 !important;
+  min-height: 0 !important;
 }
 
 #right-card {
@@ -493,10 +605,15 @@ button, input, textarea, select, label, .prose, .block, .form {
 #right-card .block,
 #left-card .form,
 #right-card .form,
-.copyable-field {
+#results-stack .block,
+#results-stack .form,
+.copyable-field,
+.copyable-field > div,
+.copyable-field > .block {
   padding: 0 !important;
   margin: 0 !important;
   gap: 0 !important;
+  min-height: 0 !important;
 }
 
 .block .label-wrap,
@@ -515,28 +632,49 @@ button, input, textarea, select, label, .prose, .block, .form {
   width: 100% !important;
 }
 
+label,
 label span,
+.block .label-wrap,
 .block .label-wrap span,
 [class*="block-label"],
-.lang-section-label {
+.field-label,
+.lang-section-label,
+.result-field-label,
+.prose .field-label,
+.prose .lang-section-label,
+.prose .result-field-label {
   background: transparent !important;
   border: none !important;
   box-shadow: none !important;
   color: #111827 !important;
+  font-family: var(--font) !important;
   font-weight: 600 !important;
   font-size: 0.95rem !important;
+  line-height: 1.4 !important;
+  letter-spacing: 0 !important;
+  text-transform: none !important;
   padding-left: 0 !important;
   padding-right: 0 !important;
 }
 
-input, textarea, select {
+input, textarea, select,
+.corrected-box,
+.corrected-box * {
   background: #ffffff !important;
   color: #111827 !important;
   border: 1px solid #d1d5db !important;
   border-radius: 10px !important;
+  font-family: var(--font) !important;
   font-size: 0.875rem !important;
   line-height: 1.5 !important;
   font-weight: 400 !important;
+  letter-spacing: 0 !important;
+}
+
+.corrected-box * {
+  background: transparent !important;
+  border: none !important;
+  border-radius: 0 !important;
 }
 
 textarea {
@@ -745,9 +883,10 @@ button.primary:hover {
 .lang-section-label {
   margin: 0 0 0.25rem 0 !important;
   padding: 0 !important;
-  color: #111827 !important;
-  font-size: 0.95rem !important;
-  font-weight: 600 !important;
+}
+
+#page-translate .field-label {
+  margin: 0 !important;
 }
 
 .lang-section-hint {
@@ -894,10 +1033,20 @@ span[data-testid="block-info"],
   position: relative !important;
 }
 
+.copyable-field .translation-html + .block .label-wrap,
+.copyable-field textarea[aria-label="Translation"] + .label-wrap {
+  display: none !important;
+  height: 0 !important;
+  margin: 0 !important;
+}
+
 .copyable-field .corrected-html,
 .copyable-field .corrected-html .html-container,
 .copyable-field .corrected-html .prose,
-.copyable-field .corrected-block {
+.copyable-field .corrected-block,
+.copyable-field .translation-html,
+.copyable-field .translation-html .html-container,
+.copyable-field .translation-html .prose {
   max-width: none !important;
   width: 100% !important;
   margin: 0 !important;
@@ -905,33 +1054,85 @@ span[data-testid="block-info"],
 }
 
 .copyable-field textarea,
-.corrected-box,
-.copyable-field .corrected-html .prose,
-.copyable-field .corrected-html .prose .corrected-box,
-.copyable-field .corrected-html .prose .corrected-box * {
-  font-size: 0.875rem !important;
-  font-weight: 400 !important;
-  line-height: 1.5 !important;
-  letter-spacing: normal !important;
-  font-variant: normal !important;
-  font-feature-settings: normal !important;
-  color: #111827 !important;
-  font-family: Inter, ui-sans-serif, system-ui, sans-serif !important;
-}
-
-.copyable-field textarea,
 .corrected-box {
   padding: 0.65rem 2.5rem 0.65rem 0.75rem !important;
 }
 
-.result-field-label {
+.result-field-head {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  gap: 0.75rem !important;
+  margin: 0 !important;
+  min-height: 1.4rem !important;
+}
+
+.corrected-block .result-field-head {
   margin: 0 0 0.25rem 0 !important;
+}
+
+.field-label {
+  margin: 0 !important;
   padding: 0 !important;
-  color: #111827 !important;
-  font-weight: 600 !important;
-  font-size: 0.95rem !important;
-  line-height: 1.4 !important;
-  font-family: Inter, ui-sans-serif, system-ui, sans-serif !important;
+}
+
+.field-group .label-wrap {
+  display: none !important;
+  height: 0 !important;
+  margin: 0 !important;
+}
+
+.star-rate {
+  display: flex !important;
+  align-items: center !important;
+  gap: 0.05rem !important;
+  flex-shrink: 0 !important;
+}
+
+.star-rate .star-btn,
+.copyable-field .star-btn {
+  appearance: none !important;
+  background: transparent !important;
+  background-image: none !important;
+  border: none !important;
+  box-shadow: none !important;
+  margin: 0 !important;
+  padding: 0 0.04rem !important;
+  min-width: 0 !important;
+  min-height: 0 !important;
+  height: auto !important;
+  width: auto !important;
+  line-height: 1 !important;
+  font-size: 1.15rem !important;
+  color: #d1d5db !important;
+  cursor: pointer !important;
+  border-radius: 0 !important;
+}
+
+.star-rate .star-btn.on {
+  color: #fbbf24 !important;
+}
+
+.star-rate:hover .star-btn {
+  color: #fbbf24 !important;
+}
+
+.star-rate:hover .star-btn:hover ~ .star-btn {
+  color: #d1d5db !important;
+}
+
+.star-read {
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 0.04rem !important;
+  line-height: 1 !important;
+  vertical-align: middle !important;
+}
+
+.star-read svg {
+  width: 0.95rem !important;
+  height: 0.95rem !important;
+  display: block !important;
 }
 
 .corrected-box {
@@ -1136,6 +1337,112 @@ if (document.readyState === "loading") {
 }
 
 let skipBenchPersistUntil = 0;
+function loadJson(key, fallback) {
+  try {
+    const raw = localStorage.getItem(key);
+    return raw ? JSON.parse(raw) : fallback;
+  } catch (e) {
+    return fallback;
+  }
+}
+function saveJson(key, value) {
+  try { localStorage.setItem(key, JSON.stringify(value)); } catch (e) {}
+}
+function emptyModelStat() {
+  return {
+    n: 0, wall: 0, eval_rate: 0, eval_rate_n: 0,
+    prompt_eval_rate: 0, prompt_eval_rate_n: 0,
+    prompt_tokens: 0, eval_tokens: 0, load_s: 0
+  };
+}
+function loadModelStats() {
+  const data = loadJson("local-lingo-model-stats", { models: {}, recorded: {} });
+  if (!data.models || typeof data.models !== "object") data.models = {};
+  if (!data.recorded || typeof data.recorded !== "object") data.recorded = {};
+  return data;
+}
+function ratingValue(entry, kind) {
+  if (!entry) return null;
+  const value = Number(entry[kind]);
+  return Number.isFinite(value) && value > 0 ? value : null;
+}
+function ratingsByModel() {
+  const ratings = loadJson("local-lingo-ratings", {});
+  const byModel = {};
+  for (const entry of Object.values(ratings)) {
+    const model = String((entry && entry.model) || "").trim();
+    if (!model) continue;
+    if (!byModel[model]) byModel[model] = { rewrite: [], translation: [] };
+    const rewrite = ratingValue(entry, "corrected");
+    const translation = ratingValue(entry, "translation");
+    if (rewrite != null) byModel[model].rewrite.push(rewrite);
+    if (translation != null) byModel[model].translation.push(translation);
+  }
+  return byModel;
+}
+function average(values) {
+  if (!values || !values.length) return null;
+  return values.reduce((a, b) => a + b, 0) / values.length;
+}
+function modelSizeB(name) {
+  const match = String(name || "").match(/(\d+(?:\.\d+)?)\s*b\b/i);
+  return match ? Number(match[1]) : null;
+}
+function pickModelBadges(models, avgs) {
+  const names = Object.keys(models || {});
+  const badges = {};
+  names.forEach((name) => { badges[name] = []; });
+  const winners = (scoreFor, higher) => {
+    const scored = [];
+    names.forEach((name) => {
+      const value = scoreFor(name);
+      if (value == null || !Number.isFinite(value)) return;
+      scored.push([name, value]);
+    });
+    if (!scored.length) return [];
+    const best = higher ? Math.max(...scored.map((item) => item[1])) : Math.min(...scored.map((item) => item[1]));
+    return scored.filter((item) => item[1] === best).map((item) => item[0]);
+  };
+  winners((name) => average((avgs[name] || {}).rewrite), true)
+    .forEach((name) => badges[name].push(["🏆", "Best rewrite"]));
+  winners((name) => average((avgs[name] || {}).translation), true)
+    .forEach((name) => badges[name].push(["🥇", "Best translation"]));
+  winners((name) => {
+    const m = models[name];
+    return m && m.n ? m.wall / m.n : null;
+  }, false).forEach((name) => badges[name].push(["⚡", "Fastest"]));
+  const sized = names.some((name) => modelSizeB(name) != null);
+  winners((name) => {
+    if (sized) return modelSizeB(name);
+    const m = models[name];
+    return m && m.n ? m.load_s / m.n : null;
+  }, false).forEach((name) => badges[name].push(["💾", "Lowest memory"]));
+  return badges;
+}
+function recordModelRuns(rows) {
+  if (!Array.isArray(rows) || !rows.length) return;
+  const stats = loadModelStats();
+  let changed = false;
+  for (const row of rows) {
+    const id = String((row && row.run_id) || [row.at, row.model, row.wall].join("|"));
+    const model = String((row && row.model) || "").trim();
+    if (!id || id === "||" || !model || stats.recorded[id]) continue;
+    const m = stats.models[model] || emptyModelStat();
+    m.n += 1;
+    m.wall += Number(row.wall) || 0;
+    const evalRate = Number(row.eval_rate);
+    if (Number.isFinite(evalRate)) { m.eval_rate += evalRate; m.eval_rate_n += 1; }
+    const promptRate = Number(row.prompt_eval_rate);
+    if (Number.isFinite(promptRate)) { m.prompt_eval_rate += promptRate; m.prompt_eval_rate_n += 1; }
+    m.prompt_tokens += Number(row.prompt_tokens) || 0;
+    m.eval_tokens += Number(row.eval_tokens) || 0;
+    m.load_s += Number(row.load_s) || 0;
+    stats.models[model] = m;
+    stats.recorded[id] = 1;
+    changed = true;
+  }
+  if (changed) saveJson("local-lingo-model-stats", stats);
+}
 function persistBenchHistory() {
   if (Date.now() < skipBenchPersistUntil) return;
   const sources = [
@@ -1151,23 +1458,187 @@ function persistBenchHistory() {
       const rows = JSON.parse(raw);
       if (Array.isArray(rows) && rows.length) {
         localStorage.setItem("local-lingo-bench", JSON.stringify(rows.slice(0, 10)));
+        recordModelRuns(rows);
         return;
       }
     } catch (e) {}
   }
 }
+function starSvg(fill, gid) {
+  let paint = "none";
+  let gradient = "";
+  if (fill >= 1) paint = "#fbbf24";
+  else if (fill >= 0.5) {
+    paint = `url(#${gid})`;
+    gradient = `<defs><linearGradient id="${gid}"><stop offset="50%" stop-color="#fbbf24"/><stop offset="50%" stop-color="transparent"/></linearGradient></defs>`;
+  }
+  const stroke = fill >= 0.5 ? "#fbbf24" : "#d1d5db";
+  return `<svg viewBox="0 0 24 24" aria-hidden="true">${gradient}<path d="M12 2.6l2.7 5.5 6.1.9-4.4 4.3 1 6.1L12 16.5 6.6 19.4l1-6.1L3.2 9l6.1-.9L12 2.6z" fill="${paint}" stroke="${stroke}" stroke-width="1.4"/></svg>`;
+}
+function readStarsHtml(value) {
+  if (value == null || !Number.isFinite(Number(value))) return "—";
+  const rounded = Math.round(Math.max(0, Math.min(5, Number(value))) * 2) / 2;
+  let html = `<span class="star-read" title="${rounded} / 5">`;
+  for (let i = 0; i < 5; i++) {
+    const fill = Math.max(0, Math.min(1, rounded - i));
+    html += starSvg(fill, `ms${i}-${String(rounded).replace(".", "p")}-${Math.random().toString(36).slice(2, 6)}`);
+  }
+  return html + "</span>";
+}
+function fmtAvgSeconds(sum, n) {
+  if (!n) return "—";
+  const value = sum / n;
+  if (value <= 0) return "—";
+  if (value < 0.01) return (value * 1000).toFixed(1) + "ms";
+  return value < 10 ? value.toFixed(1) + "s" : Math.round(value) + "s";
+}
+function fmtAvgRate(sum, n) {
+  if (!n) return "—";
+  const value = sum / n;
+  return value >= 100 ? String(Math.round(value)) : value.toFixed(1);
+}
+function renderModelStats() {
+  const root = document.getElementById("model-stats-root");
+  if (!root) return;
+  const stats = loadModelStats();
+  const models = Object.keys(stats.models || {}).sort((a, b) => {
+    const dn = (stats.models[b].n || 0) - (stats.models[a].n || 0);
+    return dn !== 0 ? dn : a.localeCompare(b);
+  });
+  if (!models.length) {
+    root.innerHTML = "";
+    return;
+  }
+  const headers = ["Model", "Badges", "Runs", "Wall", "Eval rate", "Prompt eval", "In / out", "Load", "", "Rewrite", "Translation"]
+    .map((label, i) => {
+      const extra = i === 1 ? " badges-col" : i >= 2 && i <= 7 ? " num" : i === 8 ? " bench-gap" : i >= 9 ? " rating-col" : "";
+      return `<div class="bench-h${extra}">${label}</div>`;
+    }).join("");
+  const cells = [headers];
+  const escapeHtml = (value) => String(value)
+    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const avgs = ratingsByModel();
+  const badges = pickModelBadges(stats.models, avgs);
+  models.forEach((name, index) => {
+    const m = stats.models[name] || emptyModelStat();
+    const stripe = index % 2 ? "odd" : "even";
+    const inOut = m.n ? `${Math.round(m.prompt_tokens / m.n)} / ${Math.round(m.eval_tokens / m.n)}` : "—";
+    const rewrite = average((avgs[name] || {}).rewrite);
+    const translation = average((avgs[name] || {}).translation);
+    const badgeHtml = (badges[name] || []).map(([emoji, label]) => (
+      `<span class="model-badge" title="${escapeHtml(label)}">${emoji}</span>`
+    )).join("");
+    cells.push(
+      `<div class="bench-c model-cell ${stripe}">${escapeHtml(name)}</div>`,
+      `<div class="bench-c badges-col ${stripe}">${badgeHtml ? `<span class="model-badges">${badgeHtml}</span>` : "—"}</div>`,
+      `<div class="bench-c num ${stripe}">${m.n}</div>`,
+      `<div class="bench-c num ${stripe}">${fmtAvgSeconds(m.wall, m.n)}</div>`,
+      `<div class="bench-c num ${stripe}">${fmtAvgRate(m.eval_rate, m.eval_rate_n)}</div>`,
+      `<div class="bench-c num ${stripe}">${fmtAvgRate(m.prompt_eval_rate, m.prompt_eval_rate_n)}</div>`,
+      `<div class="bench-c num ${stripe}">${inOut}</div>`,
+      `<div class="bench-c num ${stripe}">${fmtAvgSeconds(m.load_s, m.n)}</div>`,
+      `<div class="bench-c bench-gap ${stripe}"></div>`,
+      `<div class="bench-c stars-cell ${stripe}">${rewrite == null ? "—" : readStarsHtml(rewrite)}</div>`,
+      `<div class="bench-c stars-cell ${stripe}">${translation == null ? "—" : readStarsHtml(translation)}</div>`
+    );
+  });
+  root.innerHTML = `
+    <div class="bench-models">
+      <div class="bench-history-head">
+        <p class="bench-history-title">Models</p>
+        <p class="bench-history-hint">All runs · ${models.length} model${models.length === 1 ? "" : "s"}</p>
+      </div>
+      <div class="bench-models-grid">${cells.join("")}</div>
+    </div>`;
+}
+function paintStarRate(wrap, value) {
+  if (!wrap) return;
+  const score = Number(value) || 0;
+  wrap.querySelectorAll(".star-btn").forEach((btn) => {
+    const n = Number(btn.getAttribute("data-star") || 0);
+    btn.classList.toggle("on", n > 0 && n <= score);
+  });
+}
+function hydrateRatings() {
+  const ratings = loadJson("local-lingo-ratings", {});
+  document.querySelectorAll(".star-rate").forEach((wrap) => {
+    const runId = wrap.getAttribute("data-run") || "";
+    const kind = wrap.getAttribute("data-kind") || "";
+    const entry = ratings[runId];
+    paintStarRate(wrap, entry ? entry[kind] : 0);
+  });
+  document.querySelectorAll("[data-rating-run]").forEach((cell) => {
+    const runId = cell.getAttribute("data-rating-run") || "";
+    const kind = cell.getAttribute("data-rating-kind") || "";
+    const value = ratingValue(ratings[runId], kind);
+    cell.innerHTML = value == null ? "—" : readStarsHtml(value);
+  });
+}
+function applyRating(runId, kind, value, model) {
+  if (!runId || !kind) return;
+  const ratings = loadJson("local-lingo-ratings", {});
+  const prev = ratings[runId] || { model: model || "" };
+  prev[kind] = value;
+  if (model) prev.model = model;
+  ratings[runId] = prev;
+  saveJson("local-lingo-ratings", ratings);
+  const rows = loadJson("local-lingo-bench", []);
+  if (Array.isArray(rows)) {
+    for (const row of rows) {
+      if (String(row.run_id || "") !== runId) continue;
+      row.rating_corrected = prev.corrected ?? null;
+      row.rating_translation = prev.translation ?? null;
+    }
+    saveJson("local-lingo-bench", rows);
+  }
+  paintStarRate(document.querySelector(`.star-rate[data-run="${runId}"][data-kind="${kind}"]`), value);
+  document.querySelectorAll(`[data-rating-run="${runId}"][data-rating-kind="${kind}"]`).forEach((cell) => {
+    cell.innerHTML = readStarsHtml(value);
+  });
+  renderModelStats();
+}
+window.recordModelRuns = recordModelRuns;
+window.renderModelStats = renderModelStats;
+window.hydrateRatings = hydrateRatings;
 const benchPersistObserver = new MutationObserver(persistBenchHistory);
-window.addEventListener("load", () => {
+function refreshBenchExtras() {
   persistBenchHistory();
+  const root = document.getElementById("model-stats-root");
+  if (root && !root.dataset.ready) {
+    renderModelStats();
+    if (root.innerHTML) root.dataset.ready = "1";
+  }
+  hydrateRatings();
+}
+window.addEventListener("load", () => {
+  refreshBenchExtras();
   benchPersistObserver.observe(document.body, { childList: true, subtree: true, characterData: true });
 });
-setInterval(persistBenchHistory, 800);
-if (document.readyState !== "loading") persistBenchHistory();
+setInterval(refreshBenchExtras, 800);
+if (document.readyState !== "loading") refreshBenchExtras();
 
 document.addEventListener("click", (e) => {
+  const star = e.target.closest(".star-btn");
+  if (star) {
+    const wrap = star.closest(".star-rate");
+    if (!wrap) return;
+    applyRating(
+      wrap.getAttribute("data-run") || "",
+      wrap.getAttribute("data-kind") || "",
+      Number(star.getAttribute("data-star") || 0),
+      wrap.getAttribute("data-model") || ""
+    );
+    return;
+  }
   if (!e.target.closest("#bench-reset")) return;
   skipBenchPersistUntil = Date.now() + 2500;
-  try { localStorage.removeItem("local-lingo-bench"); } catch (err) {}
+  try {
+    localStorage.removeItem("local-lingo-bench");
+    localStorage.removeItem("local-lingo-model-stats");
+    localStorage.removeItem("local-lingo-ratings");
+  } catch (err) {}
+  const root = document.getElementById("model-stats-root");
+  if (root) root.innerHTML = "";
 });
 </script>
 """
@@ -1299,6 +1770,9 @@ SAVE_BENCH_JS = """
     const rows = JSON.parse(blob || "[]");
     if (Array.isArray(rows) && rows.length) {
       localStorage.setItem("local-lingo-bench", JSON.stringify(rows.slice(0, 10)));
+      if (typeof recordModelRuns === "function") recordModelRuns(rows);
+      if (typeof renderModelStats === "function") renderModelStats();
+      if (typeof hydrateRatings === "function") hydrateRatings();
     }
   } catch (e) {}
 }
@@ -1308,6 +1782,8 @@ RESET_BENCH_JS = """
 () => {
   try {
     localStorage.removeItem("local-lingo-bench");
+    localStorage.removeItem("local-lingo-model-stats");
+    localStorage.removeItem("local-lingo-ratings");
   } catch (e) {}
 }
 """
@@ -1360,9 +1836,11 @@ def _message_html(text: str = "", kind: str = "error") -> str:
 
 
 def _model_hint_html(warning: str = "") -> str:
+    label = '<p class="field-label">Model</p>'
     if warning:
-        return _message_html(warning, kind="warn")
+        return label + _message_html(warning, kind="warn")
     return (
+        f"{label}"
         '<p class="lang-section-hint">Installed Ollama models on this machine. '
         "The list refreshes when you open the app.</p>"
     )
@@ -1381,14 +1859,93 @@ def _timing_html(seconds: float | None = None) -> str:
     return f'<p class="run-timing">Completed in {_format_elapsed(seconds)}</p>'
 
 
-def _corrected_display(original: str = "", corrected: str = "") -> str:
+def _star_fill_levels(value: float | None, count: int = 5) -> list[float]:
+    if value is None:
+        return [0.0] * count
+    try:
+        score = float(value)
+    except (TypeError, ValueError):
+        return [0.0] * count
+    rounded = round(max(0.0, min(float(count), score)) * 2) / 2
+    return [max(0.0, min(1.0, rounded - index)) for index in range(count)]
+
+
+def _read_stars_html(value: float | None) -> str:
+    if value is None:
+        return "—"
+    try:
+        score = float(value)
+    except (TypeError, ValueError):
+        return "—"
+    rounded = round(max(0.0, min(5.0, score)) * 2) / 2
+    parts: list[str] = [
+        f'<span class="star-read" title="{rounded:g} / 5">'
+    ]
+    for index, fill in enumerate(_star_fill_levels(rounded)):
+        gid = f"sg{index}-{str(rounded).replace('.', 'p')}"
+        if fill >= 1:
+            paint = "#fbbf24"
+        elif fill >= 0.5:
+            paint = f"url(#{gid})"
+        else:
+            paint = "none"
+        gradient = ""
+        if 0.5 <= fill < 1:
+            gradient = (
+                f'<defs><linearGradient id="{gid}">'
+                '<stop offset="50%" stop-color="#fbbf24"/>'
+                '<stop offset="50%" stop-color="transparent"/>'
+                "</linearGradient></defs>"
+            )
+        stroke = "#fbbf24" if fill >= 0.5 else "#d1d5db"
+        parts.append(
+            f'<svg viewBox="0 0 24 24" aria-hidden="true">{gradient}'
+            '<path d="M12 2.6l2.7 5.5 6.1.9-4.4 4.3 1 6.1L12 16.5 6.6 19.4l1-6.1L3.2 9l6.1-.9L12 2.6z" '
+            f'fill="{paint}" stroke="{stroke}" stroke-width="1.4"/></svg>'
+        )
+    parts.append("</span>")
+    return "".join(parts)
+
+
+def _interactive_stars_html(kind: str, run_id: str, model: str) -> str:
+    buttons = "".join(
+        f'<button type="button" class="star-btn" data-star="{n}" '
+        f'aria-label="{n} star{"s" if n != 1 else ""}">★</button>'
+        for n in range(1, 6)
+    )
+    return (
+        f'<div class="star-rate" data-kind="{html.escape(kind)}" '
+        f'data-run="{html.escape(run_id)}" data-model="{html.escape(model)}" '
+        f'role="group" aria-label="Rate {html.escape(kind)}">{buttons}</div>'
+    )
+
+
+def _field_head(label: str, kind: str = "", run_id: str = "", model: str = "") -> str:
+    stars = _interactive_stars_html(kind, run_id, model) if run_id and kind else ""
+    return (
+        f'<div class="result-field-head">'
+        f'<p class="field-label">{html.escape(label)}</p>'
+        f"{stars}</div>"
+    )
+
+
+def _corrected_display(
+    original: str = "",
+    corrected: str = "",
+    run_id: str = "",
+    model: str = "",
+) -> str:
     body = highlight_corrections(original, corrected)
     return (
         '<div class="corrected-block">'
-        '<div class="result-field-label">Corrected (native rewrite)</div>'
-        f'<div class="corrected-box" style="font-family: Inter, ui-sans-serif, system-ui, sans-serif;">{body}</div>'
+        f'{_field_head("Corrected (native rewrite)", "corrected", run_id, model)}'
+        f'<div class="corrected-box">{body}</div>'
         "</div>"
     )
+
+
+def _translation_head(run_id: str = "", model: str = "") -> str:
+    return _field_head("Translation", "translation", run_id, model)
 
 
 def _fmt_seconds(seconds: float) -> str:
@@ -1446,6 +2003,7 @@ def _history_entry(
         preview = preview[:42].rstrip() + "…"
     load_s = (metrics.load_duration_ns or 0) / 1_000_000_000
     return {
+        "run_id": str(time.time_ns()),
         "model": metrics.model or "",
         "pair": pair or "",
         "preview": preview,
@@ -1458,6 +2016,64 @@ def _history_entry(
         "ok": bool(ok),
         "at": datetime.now().astimezone().isoformat(timespec="seconds"),
     }
+
+
+def _entry_rating_value(item: dict | None, kind: str) -> float | None:
+    if not isinstance(item, dict):
+        return None
+    key = "rating_corrected" if kind == "corrected" else "rating_translation"
+    value = item.get(key)
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _model_size_b(name: str) -> float | None:
+    match = re.search(r"(\d+(?:\.\d+)?)\s*b\b", str(name or ""), re.IGNORECASE)
+    if not match:
+        return None
+    return float(match.group(1))
+
+
+def _pick_model_badges(models: dict) -> dict[str, list[tuple[str, str]]]:
+    """Return {model: [(emoji, label), ...]} for leaders. Ties share a badge."""
+    badges: dict[str, list[tuple[str, str]]] = {name: [] for name in models}
+
+    def winners(score_for, *, higher: bool) -> list[str]:
+        scored: list[tuple[str, float]] = []
+        for name, row in models.items():
+            value = score_for(name, row)
+            if value is None:
+                continue
+            scored.append((name, float(value)))
+        if not scored:
+            return []
+        best = max(item[1] for item in scored) if higher else min(item[1] for item in scored)
+        return [name for name, value in scored if value == best]
+
+    for name in winners(lambda _n, row: row.get("rewrite_avg"), higher=True):
+        badges[name].append(("🏆", "Best rewrite"))
+    for name in winners(lambda _n, row: row.get("translation_avg"), higher=True):
+        badges[name].append(("🥇", "Best translation"))
+    for name in winners(
+        lambda _n, row: (row.get("wall") / row["n"]) if row.get("n") else None,
+        higher=False,
+    ):
+        badges[name].append(("⚡", "Fastest"))
+    sized = {name: _model_size_b(name) for name in models}
+    if any(value is not None for value in sized.values()):
+        for name in winners(lambda n, _row: sized.get(n), higher=False):
+            badges[name].append(("💾", "Lowest memory"))
+    else:
+        for name in winners(
+            lambda _n, row: (row.get("load_s") / row["n"]) if row.get("n") else None,
+            higher=False,
+        ):
+            badges[name].append(("💾", "Lowest memory"))
+    return badges
 
 
 def _append_history(history: list | None, entry: dict) -> list:
@@ -1543,12 +2159,19 @@ def _bench_info_card() -> str:
     )
 
 
+def _model_stats_root_html() -> str:
+    return '<div id="model-stats-root"></div>'
+
+
 def _benchmark_html(history: list | None = None, note: str = "") -> str:
     rows = _normalize_history(history)
     if not rows:
         return (
+            '<div class="bench">'
             '<div class="benchmark-empty">'
             "Run a translation to see timing, eval rate, and a history of the last 10 calls."
+            "</div>"
+            f"{_model_stats_root_html()}"
             "</div>"
         )
 
@@ -1567,14 +2190,21 @@ def _benchmark_html(history: list | None = None, note: str = "") -> str:
             f'<p class="lang-section-hint" style="margin:0">{html.escape(note[:400])}</p>'
         )
 
-    def cell(text: str, *, num: bool = False, extra: str = "", title: str = "") -> str:
+    def cell(
+        text: str,
+        *,
+        num: bool = False,
+        extra: str = "",
+        title: str = "",
+        attrs: str = "",
+    ) -> str:
         classes = "bench-c"
         if num:
             classes += " num"
         if extra:
             classes += f" {extra}"
         title_attr = f' title="{title}"' if title else ""
-        return f'<div class="{classes}"{title_attr}>{text}</div>'
+        return f'<div class="{classes}"{title_attr}{attrs}>{text}</div>'
 
     grid_cells = [
         '<div class="bench-h">When</div>',
@@ -1585,11 +2215,16 @@ def _benchmark_html(history: list | None = None, note: str = "") -> str:
         '<div class="bench-h num">Prompt eval</div>',
         '<div class="bench-h num">In / out</div>',
         '<div class="bench-h num">Load</div>',
+        '<div class="bench-h bench-gap"></div>',
+        '<div class="bench-h rating-col">Rewrite</div>',
+        '<div class="bench-h rating-col">Translation</div>',
     ]
     for index, item in enumerate(rows):
         stripe = "odd" if index % 2 else "even"
         when = _fmt_when(item.get("at"))
         preview = html.escape(str(item.get("preview") or "—"))
+        run_id = html.escape(str(item.get("run_id") or ""))
+        run_attr = f' data-rating-run="{run_id}"' if run_id else ""
         grid_cells.extend(
             [
                 cell(html.escape(when), extra=stripe, title=html.escape(str(item.get("at") or ""))),
@@ -1604,6 +2239,17 @@ def _benchmark_html(history: list | None = None, note: str = "") -> str:
                     extra=stripe,
                 ),
                 cell(_fmt_seconds(float(item.get("load_s") or 0)), num=True, extra=stripe),
+                cell("", extra=f"bench-gap {stripe}"),
+                cell(
+                    _read_stars_html(_entry_rating_value(item, "corrected")),
+                    extra=f"stars-cell {stripe}",
+                    attrs=f'{run_attr} data-rating-kind="corrected"' if run_attr else "",
+                ),
+                cell(
+                    _read_stars_html(_entry_rating_value(item, "translation")),
+                    extra=f"stars-cell {stripe}",
+                    attrs=f'{run_attr} data-rating-kind="translation"' if run_attr else "",
+                ),
             ]
         )
 
@@ -1653,6 +2299,7 @@ def _benchmark_html(history: list | None = None, note: str = "") -> str:
     </div>
     <div class="bench-grid">{"".join(grid_cells)}</div>
   </div>
+  {_model_stats_root_html()}
 </div>
 """
 
@@ -1717,7 +2364,7 @@ def _run(
     try:
         cleaned, pair = validate_inputs_from_languages(text, lang_a, lang_b)
     except ValidationError as exc:
-        yield (*_empty_results(), _message_html(str(exc)), _timing_html(), "", gr.update(), history, _history_blob(history))
+        yield (*_empty_results(), _message_html(str(exc)), _timing_html(), "", "", gr.update(), history, _history_blob(history))
         return
 
     chosen_model = (model or "").strip()
@@ -1727,6 +2374,7 @@ def _run(
             *_empty_results(),
             _message_html(catalog.warning, kind="warn"),
             _timing_html(),
+            "",
             "",
             gr.update(),
             history,
@@ -1746,6 +2394,7 @@ def _run(
         _message_html(""),
         _timing_html(),
         "",
+        "",
         gr.update(),
         history,
         _history_blob(history),
@@ -1764,17 +2413,18 @@ def _run(
     if not result.metrics.model:
         result.metrics.model = chosen_model
     failed = bool(result.note and (not result.corrected or result.corrected == "?"))
-    history = _append_history(
-        history,
-        _history_entry(result.metrics, cleaned, pair, ok=not failed),
-    )
+    entry = _history_entry(result.metrics, cleaned, pair, ok=not failed)
+    history = _append_history(history, entry)
     bench = _benchmark_html(history=history, note=result.note if failed else "")
+    run_id = str(entry.get("run_id") or "")
+    model_name = str(entry.get("model") or chosen_model)
 
     if failed:
         yield (
             *_empty_results(),
             _message_html(result.note),
             _timing_html(elapsed),
+            "",
             "",
             bench,
             history,
@@ -1791,7 +2441,8 @@ def _run(
         result.translation,
         _message_html(""),
         _timing_html(elapsed),
-        _corrected_display(cleaned, result.corrected),
+        _corrected_display(cleaned, result.corrected, run_id, model_name),
+        _translation_head(run_id, model_name),
         bench,
         history,
         _history_blob(history),
@@ -1866,67 +2517,75 @@ def build_ui() -> gr.Blocks:
             with gr.Row(elem_classes=["layout-row"]):
                 with gr.Column(scale=1, min_width=320, elem_id="left-card", elem_classes=["card"]):
                     default_a, default_b = codes_from_default_pair(config.DEFAULT_LANGUAGE_PAIR)
-                    gr.HTML(
-                        """
-                        <p class="lang-section-label">Languages</p>
-                        <p class="lang-section-hint">Bidirectional pair — paste text in either language. No direction to choose.</p>
-                        """
-                    )
-                    with gr.Row(elem_classes=["lang-row"]):
-                        lang_a = gr.Dropdown(
-                            choices=LANGUAGE_CHOICES,
-                            value=default_a,
-                            show_label=False,
-                            filterable=True,
-                            allow_custom_value=False,
-                            container=False,
-                            elem_classes=["lang-select"],
+                    with gr.Column(elem_classes=["field-group"]):
+                        gr.HTML(
+                            """
+                            <p class="field-label">Languages</p>
+                            <p class="lang-section-hint">Bidirectional pair — paste text in either language. No direction to choose.</p>
+                            """,
+                            padding=False,
                         )
-                        gr.HTML('<div class="lang-arrow" aria-hidden="true">⇄</div>')
-                        lang_b = gr.Dropdown(
-                            choices=LANGUAGE_CHOICES,
-                            value=default_b,
+                        with gr.Row(elem_classes=["lang-row"]):
+                            lang_a = gr.Dropdown(
+                                choices=LANGUAGE_CHOICES,
+                                value=default_a,
+                                show_label=False,
+                                filterable=True,
+                                allow_custom_value=False,
+                                container=False,
+                                elem_classes=["lang-select"],
+                            )
+                            gr.HTML('<div class="lang-arrow" aria-hidden="true">⇄</div>')
+                            lang_b = gr.Dropdown(
+                                choices=LANGUAGE_CHOICES,
+                                value=default_b,
+                                show_label=False,
+                                filterable=True,
+                                allow_custom_value=False,
+                                container=False,
+                                elem_classes=["lang-select"],
+                            )
+                    with gr.Column(elem_classes=["field-group"]):
+                        model_hint = gr.HTML(value=_model_hint_html(), padding=False)
+                        with gr.Row(elem_classes=["model-row"]):
+                            model = gr.Dropdown(
+                                choices=[],
+                                value=None,
+                                show_label=False,
+                                filterable=True,
+                                allow_custom_value=False,
+                                container=False,
+                                interactive=False,
+                                elem_classes=["model-select"],
+                            )
+                    with gr.Column(elem_classes=["field-group"]):
+                        gr.HTML('<p class="field-label">Your text</p>', padding=False)
+                        text = gr.Textbox(
+                            lines=8,
+                            max_lines=8,
+                            label="Your text",
                             show_label=False,
-                            filterable=True,
-                            allow_custom_value=False,
-                            container=False,
-                            elem_classes=["lang-select"],
+                            placeholder="Paste text in either language of the pair…",
+                            autoscroll=True,
                         )
-                    gr.HTML('<p class="lang-section-label">Model</p>')
-                    model_hint = gr.HTML(value=_model_hint_html())
-                    with gr.Row(elem_classes=["model-row"]):
-                        model = gr.Dropdown(
-                            choices=[],
-                            value=None,
-                            show_label=False,
-                            filterable=True,
-                            allow_custom_value=False,
-                            container=False,
-                            interactive=False,
-                            elem_classes=["model-select"],
-                        )
-                    text = gr.Textbox(
-                        lines=8,
-                        max_lines=8,
-                        label="Your text",
-                        placeholder="Paste text in either language of the pair…",
-                        autoscroll=True,
-                    )
                     btn = gr.Button("Correct & Translate", variant="primary")
                     form_message = gr.HTML(value=_message_html())
 
                 with gr.Column(scale=1, min_width=320, elem_id="right-card", elem_classes=["card"]):
                     placeholder = gr.HTML(value=PLACEHOLDER_HTML, visible=True)
                     with gr.Column(visible=False, elem_id="results-stack") as results:
-                        detected = gr.Textbox(
-                            label="Detected language",
-                            interactive=False,
-                            lines=1,
-                            max_lines=1,
-                            elem_classes=["lang-name-field"],
-                        )
+                        with gr.Column(elem_classes=["field-group"]):
+                            gr.HTML('<p class="field-label">Detected language</p>', padding=False)
+                            detected = gr.Textbox(
+                                label="Detected language",
+                                show_label=False,
+                                interactive=False,
+                                lines=1,
+                                max_lines=1,
+                                elem_classes=["lang-name-field"],
+                            )
 
-                        with gr.Column(elem_classes=["copyable-field"]):
+                        with gr.Column(elem_classes=["copyable-field", "field-group"]):
                             corrected_view = gr.HTML(
                                 value=_corrected_display(),
                                 padding=False,
@@ -1943,19 +2602,28 @@ def build_ui() -> gr.Blocks:
                                 size="sm",
                             )
 
-                        target = gr.Textbox(
-                            label="Target language",
-                            interactive=False,
-                            lines=1,
-                            max_lines=1,
-                            elem_classes=["lang-name-field"],
-                        )
+                        with gr.Column(elem_classes=["field-group"]):
+                            gr.HTML('<p class="field-label">Target language</p>', padding=False)
+                            target = gr.Textbox(
+                                label="Target language",
+                                show_label=False,
+                                interactive=False,
+                                lines=1,
+                                max_lines=1,
+                                elem_classes=["lang-name-field"],
+                            )
 
-                        with gr.Column(elem_classes=["copyable-field"]):
+                        with gr.Column(elem_classes=["copyable-field", "field-group"]):
+                            translation_head = gr.HTML(
+                                value=_translation_head(),
+                                padding=False,
+                                elem_classes=["translation-html"],
+                            )
                             translation = gr.Textbox(
                                 lines=5,
                                 max_lines=5,
                                 label="Translation",
+                                show_label=False,
                                 interactive=False,
                                 show_copy_button=False,
                                 autoscroll=True,
@@ -2099,6 +2767,7 @@ def build_ui() -> gr.Blocks:
                 form_message,
                 run_timing,
                 corrected_view,
+                translation_head,
                 benchmark_view,
                 bench_history,
                 bench_blob,

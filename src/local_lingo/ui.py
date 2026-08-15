@@ -393,7 +393,7 @@ button, input, textarea, select, label, .prose, .prose p, .prose div,
 .bench-models {
   border: 1px solid #e5e7eb !important;
   border-radius: 10px !important;
-  overflow: hidden !important;
+  overflow: visible !important;
   background: #ffffff !important;
   margin-top: 0.75rem !important;
 }
@@ -494,9 +494,38 @@ button, input, textarea, select, label, .prose, .prose p, .prose div,
 }
 
 .model-badge {
+  position: relative !important;
   font-size: 0.95rem !important;
   line-height: 1 !important;
-  cursor: default !important;
+  cursor: help !important;
+}
+
+.model-badge::after {
+  content: attr(data-tip) !important;
+  position: absolute !important;
+  left: 50% !important;
+  bottom: calc(100% + 7px) !important;
+  transform: translateX(-50%) !important;
+  background: #111827 !important;
+  color: #ffffff !important;
+  font-family: var(--font) !important;
+  font-size: 0.72rem !important;
+  font-weight: 600 !important;
+  letter-spacing: 0 !important;
+  text-transform: none !important;
+  line-height: 1.2 !important;
+  white-space: nowrap !important;
+  padding: 0.3rem 0.5rem !important;
+  border-radius: 6px !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+  z-index: 30 !important;
+  box-shadow: 0 6px 16px rgba(17, 24, 39, 0.18) !important;
+}
+
+.model-badge:hover::after,
+.model-badge:focus-visible::after {
+  opacity: 1 !important;
 }
 
 .bench-c.model-cell,
@@ -1064,11 +1093,8 @@ span[data-testid="block-info"],
   justify-content: space-between !important;
   gap: 0.75rem !important;
   margin: 0 !important;
+  padding: 0 0 0.25rem 0 !important;
   min-height: 1.4rem !important;
-}
-
-.corrected-block .result-field-head {
-  margin: 0 0 0.25rem 0 !important;
 }
 
 .field-label {
@@ -1526,7 +1552,7 @@ function renderModelStats() {
     const rewrite = average((avgs[name] || {}).rewrite);
     const translation = average((avgs[name] || {}).translation);
     const badgeHtml = (badges[name] || []).map(([emoji, label]) => (
-      `<span class="model-badge" title="${escapeHtml(label)}">${emoji}</span>`
+      `<span class="model-badge" data-tip="${escapeHtml(label)}" tabindex="0">${emoji}</span>`
     )).join("");
     cells.push(
       `<div class="bench-c model-cell ${stripe}">${escapeHtml(name)}</div>`,

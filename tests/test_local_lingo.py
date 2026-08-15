@@ -91,6 +91,12 @@ class ValidationTests(unittest.TestCase):
     def test_validate_text_ok(self):
         self.assertEqual(validate_text("  hello  "), "hello")
 
+    def test_validate_text_collapses_line_breaks(self):
+        self.assertEqual(
+            validate_text("Hello.\n\nI will be home\ntomorrow."),
+            "Hello. I will be home tomorrow.",
+        )
+
     def test_validate_text_empty(self):
         with self.assertRaises(ValidationError):
             validate_text("   ")

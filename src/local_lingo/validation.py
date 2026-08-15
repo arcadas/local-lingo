@@ -60,7 +60,7 @@ def validate_language_selection(lang_a: str, lang_b: str) -> str:
 
 
 def validate_text(text: str) -> str:
-    cleaned = (text or "").strip()
+    cleaned = " ".join((text or "").split())
     if not cleaned:
         raise ValidationError("Please enter some text to proofread and translate.")
     return cleaned
